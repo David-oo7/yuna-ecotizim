@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Muhit va sirlar
+.env
+.env.local
+backend/yuna.db
+backend/test_yuna.db
+backend/storage/
+backend/server.log
+*.keystore
+serviceAccount.json
+*.pem
+
+# Test artefaktlari
+backend/test_yuna.db-wal
+backend/test_yuna.db-shm
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+
+# Windows build
+windows/build/
+windows/dist/
+windows/*.spec
+
+# Loglar va vaqtinchalik
+*.log
+*.spec
+.cloud-attachments/
+
+# Muharrir
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
