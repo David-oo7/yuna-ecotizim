@@ -18,7 +18,6 @@ pytest-asyncio~=0.25
 
 # Ixtiyoriy (AI / ovoz / Telegram / R2) — o'rnatilmasa ham backend ishlaydi,
 # faqat o'sha funksiya "sozlanmagan" deb aniq xato qaytaradi.
-google-genai>=0.8
 edge-tts>=7.0
 aiogram>=3.15
 boto3>=1.35

@@ -25,12 +25,16 @@ class Settings(BaseSettings):
     access_token_ttl_min: int = 15
     refresh_token_ttl_days: int = 30
 
-    # AI
-    gemini_api_key: str = ""
-    gemini_mock: bool = False
-    gemini_model_text: str = "gemini-2.5-flash"
-    gemini_model_vision: str = "gemini-2.5-flash"
-    gemini_model_audio: str = "gemini-2.5-flash"
+    # AI (OpenRouter — bepul modellar, vazifaga qarab avtomatik tanlanadi)
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    ai_mock: bool = False
+    # Modelni qo'lda almashtirish: bo'sh bo'lsa avtomatik zanjir ishlaydi.
+    ai_model_chat: str = ""
+    ai_model_code: str = ""
+    ai_model_vision: str = ""
+    ai_model_doc: str = ""
+    ai_model_audio: str = ""
 
     # Telegram
     telegram_bot_token: str = ""
@@ -72,7 +76,7 @@ class Settings(BaseSettings):
 
     @property
     def ai_enabled(self) -> bool:
-        return bool(self.gemini_api_key) or self.gemini_mock
+        return bool(self.openrouter_api_key) or self.ai_mock
 
 
 @lru_cache

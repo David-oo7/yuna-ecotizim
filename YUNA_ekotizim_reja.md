@@ -55,12 +55,12 @@ Agent "yaxshiroq variant bormi?" deb vaqt sarflamasin — quyidagilar tanlangan.
 | ORM | SQLAlchemy 2.0 (async) + asyncpg | 2.0 | Async, Alembic bilan mos |
 | Migratsiya | Alembic | 1.13 | Baza versiyalarini boshqaradi |
 | Baza | PostgreSQL 16 (Neon) | — | Bepul, ishonchli, JSONB bor |
-| AI | Google Gemini (`google-genai`) | 2.5-flash | Matn + rasm + audio bitta kalitda |
+| AI | OpenRouter (bepul modellar) | router | Chat, kod, rasm, Word, ovoz — vazifaga qarab avtomatik model |
 | Telegram | aiogram 3 (webhook) | 3.15 | Async, FastAPI bilan bir jarayonda |
 | Scheduler | APScheduler (AsyncIOScheduler) | 3.10 | Kichik yuk uchun Celery ortiqcha |
 | Word | python-docx | 1.1 | Formatlashni saqlab tahrirlaydi |
 | TTS | edge-tts (`uz-UZ-MadinaNeural`) | 7.x | Bepul, o'zbekcha ayol ovozi |
-| STT | Gemini audio → zaxira: Google STT v2 `uz-UZ` | — | Ikki manba, biri ishlamasa ikkinchisi |
+| STT | OpenRouter multimodal (`nemotron-3-nano-omni`) | — | Zanjir: model ishlamasa keyingisiga o'tadi |
 | JWT | PyJWT | 2.9 | Oddiy va barqaror |
 | Parol hash | argon2-cffi | 23.x | bcrypt/passlib muammolaridan xoli |
 | Fayl ombori | Cloudflare R2 (S3 API, boto3) | 1.35 | Render diski vaqtinchalik |
@@ -155,11 +155,15 @@ JWT_ALGORITHM=HS256
 ACCESS_TOKEN_TTL_MIN=15
 REFRESH_TOKEN_TTL_DAYS=30
 
-# --- AI ---
-GEMINI_API_KEY=
-GEMINI_MODEL_TEXT=gemini-2.5-flash
-GEMINI_MODEL_VISION=gemini-2.5-flash
-GEMINI_MODEL_AUDIO=gemini-2.5-flash
+# --- AI (OpenRouter, bepul modellar) ---
+OPENROUTER_API_KEY=
+AI_MOCK=false
+# Bo'sh bo'lsa model vazifaga qarab avtomatik tanlanadi:
+AI_MODEL_CHAT=
+AI_MODEL_CODE=
+AI_MODEL_VISION=
+AI_MODEL_DOC=
+AI_MODEL_AUDIO=
 
 # --- Telegram ---
 TELEGRAM_BOT_TOKEN=
@@ -646,7 +650,7 @@ Har funksiya uchun: qanday ishlaydi, qaysi endpointlar, cheklovlar, "tayyor" mez
 
 ### 9.9. Ovozli suhbat (o'zbekcha)
 - Oqim: mikrofon → `.m4a` (16 kHz, mono) → `POST /voice/chat` → STT → intent → TTS → matn + audio URL.
-- **STT:** asosiy — Gemini audio (bitta so'rovda transkript), zaxira — Google STT v2 `uz-UZ`. `stt_service.py` da `transcribe(audio, lang) -> str` interfeysi, ikkala provayder shu interfeys ostida. **Aniqlikni o'lchash:** 10 ta real ovozli namuna, so'z xatosi foizi jadvalga yoziladi, eng yaxshisi qoladi.
+- **STT:** asosiy — OpenRouter multimodal modeli (bitta so'rovda transkript), zaxira — zanjirdagi keyingi model. `stt_service.py` da `transcribe(audio, lang) -> str` interfeysi, ikkala provayder shu interfeys ostida. **Aniqlikni o'lchash:** 10 ta real ovozli namuna, so'z xatosi foizi jadvalga yoziladi, eng yaxshisi qoladi.
 - **TTS:** `edge-tts` `uz-UZ-MadinaNeural`, `rate="+8%"`. Natija mp3, R2/local'ga saqlanadi, `audio_url` qaytadi. Keshlash: matn hash bo'yicha bir xil javob qayta sintez qilinmaydi.
 - Latency maqsadi: birinchi javob < 3 s (5-bosqichda SSE bilan < 1.5 s).
 - "Hey Yuna" uyg'otuvchi so'z — **v2**, hozir emas.
@@ -750,7 +754,7 @@ Har bosqich mustaqil "ishlaydigan" holat beradi. Bosqich tugamaguncha keyingisig
 | Qo'lda | 3 kanal, real qurilma | checklist | bosqich oxirida |
 | Yuklama | 50 parallel chat | locust (ixtiyoriy) | 6-bosqich |
 
-**Qoida:** CI'da AI'ga haqiqiy so'rov yuborilmaydi (xarajat + beqarorlik). `GEMINI_MOCK=1` bo'lsa `ai_service` qayd etilgan javoblarni qaytaradi.
+**Qoida:** CI'da AI'ga haqiqiy so'rov yuborilmaydi (xarajat + beqarorlik). `AI_MOCK=true` bo'lsa `ai_service` qayd etilgan javoblarni qaytaradi.
 
 **Qo'lda tekshirish ro'yxati (har bosqichda takrorlanadi):**
 1. Yangi user ro'yxatdan o'tadi → chat ishlaydi
@@ -818,7 +822,7 @@ cd android && ./gradlew assembleRelease        # imzolash: keystore (gitignore'd
 |---|---|---|
 | Neon | 0.5 GB, 1 loyiha | Ha (shaxsiy foydalanish) |
 | Render | 750 soat/oy, uxlaydi | Demo uchun ha; doimiy ish uchun $7/oy |
-| Gemini 2.5 Flash | bepul kvota (daqiqa/kun) | Shaxsiy foydalanishga ha; limitga tushsa `429` → navbat |
+| OpenRouter bepul modellari | daqiqasiga ~20, kuniga ~50 so'rov | Ha; limitga tushsa router zanjirdagi keyingi modelga o'tadi |
 | Cloudflare R2 | 10 GB | Ha |
 | edge-tts | bepul | Ha |
 | FCM | bepul | Ha |
@@ -832,7 +836,7 @@ cd android && ./gradlew assembleRelease        # imzolash: keystore (gitignore'd
 | Xatar | Belgisi | Yechim |
 |---|---|---|
 | Render uxlab qoladi → eslatma kechikadi | push kelmaydi | Cron ping yoki pulli tarif; kechikkan eslatmalar deploydan keyin "o'tkazib yuborilganlar" sifatida yuboriladi (kechikish > 5 daq bo'lsa "kechikdim" izohi bilan) |
-| Gemini limiti/uzilishi | `AI_UNAVAILABLE` | 3 marta qayta urinish (1s, 3s, 9s), keyin foydalanuvchiga aniq xabar |
+| AI limiti/uzilishi | `AI_UNAVAILABLE` | 3 marta qayta urinish (1s, 3s, 9s), keyin foydalanuvchiga aniq xabar |
 | STT o'zbekchada xato | noto'g'ri intent | Ikki provayder + "shunday dedingizmi?" tasdiqlash tugmasi |
 | Android fonda ilova ochmaydi | buyruq bajarilmaydi | Foreground service + ruxsatlar bo'yicha qo'llanma ekrani |
 | docx formatlash buziladi | shrift/o'lcham yo'qoladi | Run darajasida almashtirish + 3 ta test hujjat |

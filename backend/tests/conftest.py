@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Ilova import qilinishidan OLDIN muhit o'zgaruvchilari
 os.environ["APP_ENV"] = "test"
-os.environ["GEMINI_MOCK"] = "true"
+os.environ["AI_MOCK"] = "true"
 os.environ["AUTO_MIGRATE"] = "false"
 os.environ["STORAGE_DRIVER"] = "local"
 os.environ["STORAGE_LOCAL_DIR"] = tempfile.mkdtemp(prefix="yuna-test-")

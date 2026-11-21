@@ -13,7 +13,7 @@ va **Telegram bot** — hammasi bitta bazadan, bitta shaxsiyatdan (Yuna) foydala
 cd backend
 python -m venv .venv && .venv\Scripts\activate      # Windows
 pip install -r requirements.txt
-cp .env.example .env                                 # GEMINI_API_KEY ni qo'ying (ixtiyoriy)
+cp .env.example .env                                 # OPENROUTER_API_KEY ni qo'ying (ixtiyoriy)
 alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
@@ -23,9 +23,32 @@ Tekshirish:
 - API hujjati (Swagger): <http://localhost:8000/docs>
 - Salomatlik: <http://localhost:8000/health>
 
-> `.env` da `GEMINI_MOCK=true` bo'lsa AI tarmoqqa chiqmaydi va tayyor (mock) javoblar
-> qaytaradi — kalitsiz ham butun oqimni sinash mumkin. Haqiqiy AI uchun
-> `GEMINI_API_KEY` ni qo'ying va `GEMINI_MOCK=false` qiling.
+> `.env` da `AI_MOCK=true` bo'lsa (yoki `OPENROUTER_API_KEY` bo'sh bo'lsa) AI tarmoqqa
+> chiqmaydi va tayyor (mock) javoblar qaytaradi — kalitsiz ham butun oqimni sinash mumkin.
+> Haqiqiy AI uchun `OPENROUTER_API_KEY` ni qo'ying va `AI_MOCK=false` qiling.
+
+---
+
+## AI: OpenRouter bepul modellari
+
+Provayder — [OpenRouter](https://openrouter.ai). Model **vazifaga qarab avtomatik** tanlanadi;
+model band bo'lsa (429), xato bersa yoki bo'sh javob qaytsa — zanjirdagi keyingi bepul modelga
+o'tiladi. Kalitlar faqat backendda (`backend/.env`), APK/Windows/Telegram kodida kalit yo'q.
+
+| Vazifa | Asosiy model (bepul) | Zaxira modellar |
+|---|---|---|
+| Chat / umumiy savol | `nvidia/nemotron-3-ultra-550b-a55b:free` | `baidu/ernie-5.5-flash-preview:free`, `google/gemma-4-31b-it:free` |
+| Kod yozish | `cohere/north-mini-code:free` | `recursive/flint-v1.0:free`, `nvidia/nemotron-3-ultra-550b-a55b:free` |
+| Rasm (multimodal) | `nvidia/nemotron-3.5-super-vl:free` | `google/gemma-4-31b-it:free`, `inclusionai/ling-3.2-flash:free` |
+| Word hujjat tahriri | `dots-studio/dots-3-note-preview:free` | `nvidia/nemotron-3-ultra-550b-a55b:free` |
+| Ovoz (STT) | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` | `google/gemma-4-26b-a4b-it:free` |
+
+Kod modeli `mode="code"` bo'lganda yoki matnda kod belgilari (`def`, `function`, `SELECT … FROM`)
+uchrasa o'zi yoqiladi. Modelni qo'lda almashtirish (ixtiyoriy): `AI_MODEL_CHAT`, `AI_MODEL_CODE`,
+`AI_MODEL_VISION`, `AI_MODEL_DOC`, `AI_MODEL_AUDIO`.
+
+> Bepul tarif limiti: daqiqasiga ~20, kuniga ~50 so'rov. Limit tugasa router keyingi modelga
+> o'tadi; hammasi band bo'lsa foydalanuvchiga `AI_UNAVAILABLE` xatosi qaytadi.
 
 ---
 
@@ -57,7 +80,7 @@ rate limit, kundalik maslahat, xato formati.
 | Ovqat hisobi: matn → taomlar → kkal/oqsil/yog'/uglevod, kunlik jami | ✅ |
 | Kundalik maslahat (kuniga 1 ta, takrorlanmaydi) | ✅ |
 | Word: yuklash → AI tahriri → yangi versiya → yuklab olish | ✅ |
-| Ovoz: STT (Gemini, zaxira reja), TTS (edge-tts `uz-UZ-MadinaNeural`), `/voice/chat` | ✅ |
+| Ovoz: STT (OpenRouter multimodal modeli), TTS (edge-tts `uz-UZ-MadinaNeural`), `/voice/chat` | ✅ |
 | Rasm tushuntirish (siqish + vision) | ✅ |
 | Qurilmalar: ro'yxatga olish, ilovalar sinxroni, buyruq + ack | ✅ |
 | WebSocket: real vaqt sinxron, buyruqlar, eslatma/maslahat yetkazish | ✅ |
@@ -163,8 +186,8 @@ Repo: <https://github.com/David-oo7/yuna-ecotizim> (backend shu repo ichida, `ba
    APP_BASE_URL=https://<servis-nomi>.onrender.com
    DATABASE_URL=<Render Postgres'dagi Internal Database URL>
    AUTO_MIGRATE=true
-   GEMINI_API_KEY=<kalitingiz>      # bo'sh qolsa chat AI javob bermaydi
-   GEMINI_MOCK=false
+   OPENROUTER_API_KEY=<kalitingiz>  # bo'sh qolsa chat AI javob bermaydi
+   AI_MOCK=false
    STORAGE_LOCAL_DIR=/var/data/storage
    STORAGE_DRIVER=local
    ```
@@ -206,7 +229,7 @@ Repo: <https://github.com/David-oo7/yuna-ecotizim> (backend shu repo ichida, `ba
 
 ## Keyingi qadamlar (reja bo'yicha)
 
-1. `GEMINI_API_KEY` qo'yish va real AI bilan 10 ta savolda aniqlikni tekshirish
+1. `OPENROUTER_API_KEY` qo'yish va real AI bilan 10 ta savolda aniqlikni tekshirish
 2. Neon + Render'ga deploy, `alembic upgrade head`
 3. Telegram tokenini qo'yish va botni ulash
 4. `uz-UZ` STT sifatini 10 ta ovozli namunada o'lchash

@@ -43,7 +43,7 @@ async def chat_stream(
 ) -> StreamingResponse:
     """Server-Sent Events: tayyor javob bo'laklarga bo'lib yuboriladi.
 
-    (Haqiqiy token oqimi Gemini streaming bilan 5-bosqichda qo'shiladi.)
+    (Haqiqiy token oqimi OpenRouter streaming bilan 5-bosqichda qo'shiladi.)
     """
     result = await chat_service.handle_message(
         db,

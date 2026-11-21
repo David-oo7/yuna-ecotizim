@@ -1,4 +1,4 @@
-"""Ovoz: TTS (edge-tts) va STT (Gemini) — ikkalasi ham mock rejimni biladi."""
+"""Ovoz: TTS (edge-tts) va STT (OpenRouter) — ikkalasi ham mock rejimni biladi."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ async def synthesize(text: str) -> tuple[bytes, str]:
     if key in _cache:
         return _cache[key], path
 
-    if settings.gemini_mock or not _edge_available():
+    if settings.ai_mock or not _edge_available():
         audio = b"ID3\x04\x00\x00\x00\x00\x00\x00mock-audio"
         _cache[key] = audio
         return audio, path

@@ -1,19 +1,27 @@
-"""AI xizmati — provayder bilan YAGONA aloqa nuqtasi.
+"""AI xizmati — OpenRouter bilan YAGONA aloqa nuqtasi.
 
-Boshqa hech qayerda `google.genai` import qilinmaydi.
+Boshqa hech qayerda provayder SDK'si import qilinmaydi.
 Provayder almashsa faqat shu fayl o'zgaradi.
 
-GEMINI_MOCK=true bo'lsa tarmoqqa chiqilmaydi (testlar va oflayn ish uchun).
+Model vazifaga qarab AVTOMATIK tanlanadi (chat, kod, rasm, Word, ovoz).
+Birinchi model band bo'lsa (429), xato bersa yoki javob bo'sh qaytsa —
+zanjirdagi keyingi bepul modelga o'tadi.
+
+AI_MOCK=true bo'lsa (yoki OPENROUTER_API_KEY bo'lmasa) tarmoqqa chiqilmaydi
+— testlar va oflayn ish uchun tayyor javoblar qaytariladi.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any
+
+import httpx
 
 from app.config import settings
 from app.services import persona
@@ -32,35 +40,83 @@ class AIResult:
     usage: dict[str, int] = field(default_factory=dict)
 
 
-# --------------------------- sxema ---------------------------
-RESPONSE_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "reply": {"type": "string"},
-        "actions": {
-            "type": "array",
-            "maxItems": 3,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "type": {
-                        "type": "string",
-                        "enum": [
-                            "reminder_create",
-                            "reminder_cancel",
-                            "food_log",
-                            "app_open",
-                            "none",
-                        ],
-                    },
-                    "payload": {"type": "object"},
-                },
-                "required": ["type", "payload"],
-            },
-        },
-    },
-    "required": ["reply", "actions"],
+# --------------------------- model tanlash ---------------------------
+# Vazifa -> bepul modellar zanjiri (birinchi ishlamasa keyingisiga o'tiladi).
+TASK_MODELS: dict[str, tuple[str, ...]] = {
+    "chat": (
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "baidu/ernie-5.5-flash-preview:free",
+        "google/gemma-4-31b-it:free",
+    ),
+    "code": (
+        "cohere/north-mini-code:free",
+        "recursive/flint-v1.0:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+    ),
+    "vision": (
+        "nvidia/nemotron-3.5-super-vl:free",
+        "google/gemma-4-31b-it:free",
+        "inclusionai/ling-3.2-flash:free",
+    ),
+    "doc": (
+        "dots-studio/dots-3-note-preview:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "google/gemma-4-31b-it:free",
+    ),
+    "audio": (
+        "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free",
+        "google/gemma-4-26b-a4b-it:free",
+    ),
 }
+
+# .env orqali qo'lda almashtirish (bo'sh bo'lsa avtomatik zanjir ishlatiladi).
+_MODEL_OVERRIDES: dict[str, str] = {
+    "chat": "ai_model_chat",
+    "code": "ai_model_code",
+    "vision": "ai_model_vision",
+    "doc": "ai_model_doc",
+    "audio": "ai_model_audio",
+}
+
+_CODE_HINTS = re.compile(
+    r"```|\bdef\s+\w+\s*\(|\bfunction\s+\w+\s*\(|\bclass\s+\w+|\bimport\s+\w+"
+    r"|\bSELECT\b[\s\S]{0,80}\bFROM\b|\b(?:kod|code|skript|script|dastur)\b"
+    r"|\b(?:python|javascript|typescript|java|kotlin|sql|html|css|c\+\+|php|golang)\b",
+    re.IGNORECASE,
+)
+
+
+def _model_chain(task: str) -> list[str]:
+    models = list(TASK_MODELS.get(task, TASK_MODELS["chat"]))
+    override = getattr(settings, _MODEL_OVERRIDES.get(task, ""), "") or ""
+    override = override.strip()
+    if override:
+        models = [override] + [m for m in models if m != override]
+    # Takrorlanmasin
+    seen: set[str] = set()
+    return [m for m in models if not (m in seen or seen.add(m))]
+
+
+def _auto_task(text: str, mode: str) -> str:
+    """Matn va rejimga qarab vazifani aniqlaydi."""
+    if mode == "code":
+        return "code"
+    if _CODE_HINTS.search(text or ""):
+        return "code"
+    return "chat"
+
+
+def _audio_format(mime: str) -> str:
+    mime = (mime or "").lower()
+    if "wav" in mime:
+        return "wav"
+    if "mpeg" in mime or "mp3" in mime:
+        return "mp3"
+    if "ogg" in mime or "opus" in mime:
+        return "ogg"
+    if "webm" in mime:
+        return "webm"
+    return "m4a"
 
 
 # --------------------------- mock ---------------------------
@@ -198,7 +254,7 @@ def _mock_reply(text: str, mode: str, image: bool = False, audio: bool = False) 
     )
 
 
-# --------------------------- real ---------------------------
+# --------------------------- real (OpenRouter) ---------------------------
 def _extract_json(text: str) -> dict[str, Any]:
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -217,69 +273,133 @@ def _extract_json(text: str) -> dict[str, Any]:
     return data
 
 
-async def _gemini(
-    prompt: str,
-    system: str,
+def _content_text(content: Any) -> str:
+    """Javob matni: ba'zi provayderlar bo'laklar ro'yxatini qaytaradi."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text") or ""))
+            elif isinstance(item, str):
+                parts.append(item)
+        return "".join(parts)
+    return ""
+
+
+def _headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {settings.openrouter_api_key}",
+        "Content-Type": "application/json",
+        # OpenRouter statistikasi uchun (majburiy emas)
+        "HTTP-Referer": settings.app_base_url or "https://github.com/David-oo7/yuna-ecotizim",
+        "X-Title": persona.YUNA_DISPLAY_NAME,
+    }
+
+
+async def _post(
     model: str,
-    image_bytes: bytes | None = None,
-    image_mime: str = "image/jpeg",
-    audio_bytes: bytes | None = None,
-    audio_mime: str = "audio/m4a",
-    force_json: bool = True,
+    messages: list[dict[str, Any]],
+    *,
+    temperature: float,
+    max_tokens: int,
+    force_json: bool,
+    timeout: float,
+) -> tuple[str, dict[str, int]]:
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+    }
+    if force_json:
+        payload["response_format"] = {"type": "json_object"}
+
+    url = f"{settings.openrouter_base_url.rstrip('/')}/chat/completions"
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await client.post(url, json=payload, headers=_headers())
+        if (
+            response.status_code == 400
+            and force_json
+            and "response_format" in response.text.lower()
+        ):
+            # Model strukturali JSON'ni qo'llamaydi — oddiy rejimda qayta so'raymiz
+            payload.pop("response_format", None)
+            response = await client.post(url, json=payload, headers=_headers())
+        response.raise_for_status()
+        data = response.json()
+
+    choices = data.get("choices") or []
+    if not choices:
+        raise AIUnavailable("AI bo'sh javob qaytardi")
+    text = _content_text((choices[0].get("message") or {}).get("content")).strip()
+    if not text:
+        raise AIUnavailable("AI bo'sh javob qaytardi")
+
+    raw_usage = data.get("usage") or {}
+    usage = {
+        "input_tokens": int(raw_usage.get("prompt_tokens") or 0),
+        "output_tokens": int(raw_usage.get("completion_tokens") or 0),
+    }
+    usage["total_tokens"] = usage["input_tokens"] + usage["output_tokens"]
+    return text, usage
+
+
+async def _complete(
+    task: str,
+    messages: list[dict[str, Any]],
+    *,
+    temperature: float = 0.6,
+    max_tokens: int = 2048,
+    force_json: bool = False,
+    timeout: float = 90.0,
 ) -> tuple[dict[str, Any] | str, dict[str, int]]:
-    if not settings.gemini_api_key:
-        raise AIUnavailable("GEMINI_API_KEY sozlanmagan")
+    """Vazifaga mos modelni tanlab, zanjir bo'ylab urinadi."""
+    if not settings.openrouter_api_key:
+        raise AIUnavailable("OPENROUTER_API_KEY sozlanmagan")
 
-    def _call() -> tuple[dict[str, Any] | str, dict[str, int]]:
+    last_error = "noma'lum xato"
+    for model in _model_chain(task):
         try:
-            from google import genai
-            from google.genai import types
-        except ImportError as exc:  # pragma: no cover
-            raise AIUnavailable("google-genai o'rnatilmagan") from exc
+            text, usage = await _post(
+                model,
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                force_json=force_json,
+                timeout=timeout,
+            )
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            last_error = f"{model}: HTTP {status}"
+            logger.warning("OpenRouter %s → HTTP %s", model, status)
+            if status == 429:
+                await asyncio.sleep(0.6)
+            continue
+        except (httpx.HTTPError, ValueError) as exc:
+            last_error = f"{model}: {exc}"
+            logger.warning("OpenRouter %s ulanish xatosi: %s", model, exc)
+            continue
+        except AIUnavailable as exc:
+            last_error = f"{model}: {exc}"
+            continue
 
-        client = genai.Client(api_key=settings.gemini_api_key)
-        parts: list[Any] = []
-        if image_bytes:
-            parts.append(types.Part.from_bytes(data=image_bytes, mime_type=image_mime))
-        if audio_bytes:
-            parts.append(types.Part.from_bytes(data=audio_bytes, mime_type=audio_mime))
-        parts.append(types.Part(text=prompt))
-
-        config = types.GenerateContentConfig(
-            system_instruction=system,
-            temperature=0.6,
-            max_output_tokens=2048,
-        )
         if force_json:
-            config.response_mime_type = "application/json"
-            config.response_schema = RESPONSE_SCHEMA
+            try:
+                parsed = _extract_json(text)
+            except (AIUnavailable, json.JSONDecodeError) as exc:
+                last_error = f"{model}: JSON xato ({exc})"
+                logger.warning("OpenRouter %s noto'g'ri JSON", model)
+                continue
+            logger.info("AI javob: %s (%s)", model, task)
+            return parsed, usage
 
-        response = client.models.generate_content(
-            model=model, contents=parts, config=config
-        )
-        usage: dict[str, int] = {}
-        meta = getattr(response, "usage_metadata", None)
-        if meta:
-            usage = {
-                "input_tokens": getattr(meta, "prompt_token_count", 0) or 0,
-                "output_tokens": getattr(meta, "candidates_token_count", 0) or 0,
-            }
-        text = (response.text or "").strip()
-        if not text:
-            raise AIUnavailable("AI bo'sh javob qaytardi")
-        if force_json:
-            return _extract_json(text), usage
+        logger.info("AI javob: %s (%s)", model, task)
         return text, usage
 
-    try:
-        return await asyncio.wait_for(asyncio.to_thread(_call), timeout=60)
-    except AIUnavailable:
-        raise
-    except asyncio.TimeoutError as exc:
-        raise AIUnavailable("AI javobi juda kechikdi") from exc
-    except Exception as exc:  # pragma: no cover - tashqi xizmat
-        logger.warning("Gemini xatosi: %s", exc)
-        raise AIUnavailable("AI xizmati vaqtincha ishlamayapti") from exc
+    logger.error("Barcha AI modellari ishlamadi (%s): %s", task, last_error)
+    raise AIUnavailable("AI xizmati vaqtincha ishlamayapti")
 
 
 # --------------------------- ommaviy API ---------------------------
@@ -297,8 +417,8 @@ async def respond(
     mode: str = "auto",
     user_name: str | None = None,
 ) -> AIResult:
-    """Matnli suhbat: reply + actions."""
-    if settings.gemini_mock or not settings.gemini_api_key:
+    """Matnli suhbat: reply + actions. Model avtomatik tanlanadi."""
+    if settings.ai_mock or not settings.openrouter_api_key:
         result = await asyncio.to_thread(_mock_reply, text, mode)
         result.usage = {
             "input_tokens": len(text) // 4,
@@ -306,14 +426,21 @@ async def respond(
         }
         return result
 
+    task = _auto_task(text, mode)
     prompt = (
         f"{_history_text(history)}\n\n"
         f"foydalanuvchi: {text}\n\n"
         "Yuqoridagi suhbatga javob ber. Faqat JSON qaytar: "
         '{"reply": "...", "actions": [...]}'
     )
-    data, usage = await _gemini(
-        prompt, persona.system_prompt(mode, user_name), settings.gemini_model_text
+    data, usage = await _complete(
+        task,
+        [
+            {"role": "system", "content": persona.system_prompt(mode, user_name)},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.6 if task != "code" else 0.2,
+        force_json=True,
     )
     assert isinstance(data, dict)
     return AIResult(
@@ -326,37 +453,58 @@ async def respond(
 async def explain_image(
     image_bytes: bytes, question: str | None, user_name: str | None = None
 ) -> str:
-    if settings.gemini_mock or not settings.gemini_api_key:
+    if settings.ai_mock or not settings.openrouter_api_key:
         return _mock_reply(question or "rasm", "auto", image=True).reply
+
     prompt = question or "Bu rasmda nima bor? O'zbek tilida qisqa tushuntir."
-    text, _ = await _gemini(
-        prompt,
-        persona.system_prompt("auto", user_name),
-        settings.gemini_model_vision,
-        image_bytes=image_bytes,
-        force_json=False,
-    )
+    encoded = base64.b64encode(image_bytes).decode()
+    messages = [
+        {"role": "system", "content": persona.system_prompt("auto", user_name)},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}},
+            ],
+        },
+    ]
+    text, _ = await _complete("vision", messages, temperature=0.4, max_tokens=1024, timeout=120.0)
     return str(text).strip()
 
 
 async def transcribe(audio_bytes: bytes, mime: str = "audio/m4a") -> str:
-    if settings.gemini_mock or not settings.gemini_api_key:
+    if settings.ai_mock or not settings.openrouter_api_key:
         return "salom yuna"
-    text, _ = await _gemini(
-        "Quyidagi ovozni so'zma-so'z o'zbek lotin alifbosida yoz. Faqat matn qaytar.",
-        "Sen aniq transkripsiya qiluvchi vositachisan.",
-        settings.gemini_model_audio,
-        audio_bytes=audio_bytes,
-        audio_mime=mime,
-        force_json=False,
-    )
+
+    encoded = base64.b64encode(audio_bytes).decode()
+    messages = [
+        {
+            "role": "system",
+            "content": "Sen aniq transkripsiya qiluvchi vositachisan.",
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Quyidagi ovozni so'zma-so'z o'zbek lotin alifbosida yoz. "
+                    "Faqat matn qaytar.",
+                },
+                {
+                    "type": "input_audio",
+                    "input_audio": {"data": encoded, "format": _audio_format(mime)},
+                },
+            ],
+        },
+    ]
+    text, _ = await _complete("audio", messages, temperature=0.1, max_tokens=1024, timeout=120.0)
     return str(text).strip()
 
 
 async def daily_advice(
     user_name: str, food_totals: dict[str, float], reminders_count: int, recent: list[str]
 ) -> str:
-    if settings.gemini_mock or not settings.gemini_api_key:
+    if settings.ai_mock or not settings.openrouter_api_key:
         return (
             f"{user_name}, bugun 2 stakan suv ichishni unutmang. "
             "Kichik qadamlar katta natija beradi."
@@ -367,10 +515,16 @@ async def daily_advice(
         f"Bugungi eslatmalar soni: {reminders_count}\n"
         f"Oxirgi maslahatlar: {recent}\n\n"
         "Bitta qisqa (2 jumladan ko'p bo'lmagan), takrorlanmaydigan, foydali "
-        "kundalik maslahat yoz. Faqat JSON: {\"reply\": \"...\", \"actions\": []}"
+        'kundalik maslahat yoz. Faqat JSON: {"reply": "...", "actions": []}'
     )
-    data, _ = await _gemini(
-        prompt, persona.system_prompt("auto", user_name), settings.gemini_model_text
+    data, _ = await _complete(
+        "chat",
+        [
+            {"role": "system", "content": persona.system_prompt("auto", user_name)},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.8,
+        force_json=True,
     )
     assert isinstance(data, dict)
     return str(data["reply"]).strip()
@@ -379,8 +533,8 @@ async def daily_advice(
 async def docx_changes(
     paragraphs: list[str], instruction: str
 ) -> dict[str, Any]:
-    """Hujjat tahriri uchun strukturali o'zgarishlar."""
-    if settings.gemini_mock or not settings.gemini_api_key:
+    """Hujjat tahriri uchun strukturali o'zgarishlar (Word uchun alohida model)."""
+    if settings.ai_mock or not settings.openrouter_api_key:
         changes = []
         if paragraphs:
             changes.append(
@@ -395,48 +549,18 @@ async def docx_changes(
         '{"changes": [{"target": "p:3", "new_text": "..."} | '
         '{"target": "p:5", "delete": true}], "notes": "qisqa izoh"}'
     )
-    schema = {
-        "type": "object",
-        "properties": {
-            "changes": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "target": {"type": "string"},
-                        "new_text": {"type": "string"},
-                        "delete": {"type": "boolean"},
-                    },
-                    "required": ["target"],
-                },
-            },
-            "notes": {"type": "string"},
-        },
-        "required": ["changes"],
-    }
-    if not settings.gemini_api_key:
-        raise AIUnavailable("GEMINI_API_KEY sozlanmagan")
-
-    def _call() -> dict[str, Any]:
-        from google import genai
-        from google.genai import types
-
-        client = genai.Client(api_key=settings.gemini_api_key)
-        config = types.GenerateContentConfig(
-            system_instruction=persona.system_prompt(),
-            temperature=0.3,
-            response_mime_type="application/json",
-            response_schema=schema,
-        )
-        response = client.models.generate_content(
-            model=settings.gemini_model_text, contents=[prompt], config=config
-        )
-        return _extract_json(response.text or "{}")
-
-    try:
-        return await asyncio.wait_for(asyncio.to_thread(_call), timeout=120)
-    except AIUnavailable:
-        raise
-    except Exception as exc:  # pragma: no cover
-        logger.warning("Gemini (docx) xatosi: %s", exc)
-        raise AIUnavailable("Hujjatni tahrirlashda AI javob bermadi") from exc
+    data, _ = await _complete(
+        "doc",
+        [
+            {"role": "system", "content": persona.system_prompt()},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.3,
+        max_tokens=4096,
+        force_json=True,
+        timeout=120.0,
+    )
+    assert isinstance(data, dict)
+    if "changes" not in data:
+        raise AIUnavailable("Hujjatni tahrirlashda AI javob bermadi")
+    return data
