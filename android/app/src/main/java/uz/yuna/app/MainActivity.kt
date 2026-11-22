@@ -3,6 +3,7 @@ package uz.yuna.app
 import android.Manifest
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import android.net.Uri
@@ -11,6 +12,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -104,6 +106,12 @@ private enum class Tabs(val title: String, val icon: ImageVector) {
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1001)
+        }
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
@@ -136,6 +144,7 @@ private fun YunaApp() {
         if (loggedIn) {
             Api.setBaseUrl(session.serverUrl ?: BuildConfig.API_URL)
             runCatching { Api.service.me(session.bearer) }.onSuccess { user = it }
+            ReminderScheduler.syncAsync(context)
         }
     }
 
@@ -894,6 +903,7 @@ private fun MessageBubble(message: UiMessage) {
 // --------------------------- ESLATMALAR ---------------------------
 @Composable
 private fun RemindersScreen(session: Session) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf<List<ReminderDto>>(emptyList()) }
     var text by remember { mutableStateOf("") }
@@ -904,6 +914,8 @@ private fun RemindersScreen(session: Session) {
         runCatching { Api.service.reminders(session.bearer) }
             .onSuccess { items = it.items.filter { r -> r.status == "pending" } }
             .onFailure { error = it.message }
+        // Qo'ng'iroq vaqtlari qurilmada alarm sifatida qayta qo'yiladi.
+        ReminderScheduler.syncAsync(context)
     }
 
     LaunchedEffect(Unit) { load() }
@@ -946,6 +958,38 @@ private fun RemindersScreen(session: Session) {
             error?.let {
                 Spacer(Modifier.height(6.dp))
                 Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Eslatma vaqti kelganda matn ovoz bilan o'qiladi — ilova yopiq bo'lsa ham.",
+                color = MUTED,
+                fontSize = 11.sp,
+            )
+        }
+
+        if (!ReminderScheduler.canUseExactAlarms(context)) {
+            sectionCard("Aniq vaqt ruxsati") {
+                Text(
+                    "Eslatma aynan belgilangan daqiqada jiringlashi uchun " +
+                        "\"Alarmlar va eslatmalar\" ruxsatini bering.",
+                    color = MUTED,
+                    fontSize = 12.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                        data = android.net.Uri.parse("package:" + context.packageName)
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                )
+                            }
+                        }
+                    },
+                ) { Text("Ruxsat berish") }
             }
         }
 
