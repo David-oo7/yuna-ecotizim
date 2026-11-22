@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -29,6 +30,28 @@ def _doc_out(record: FileRecord) -> DocOut:
         size_bytes=record.size_bytes,
         download_url=storage_service.presigned_url(record.storage_path),
     )
+
+
+@router.get("/docs")
+async def list_docs(
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Foydalanuvchining Word hujjatlari — har bir versiya alohida qator."""
+    result = await db.execute(
+        select(FileRecord)
+        .where(FileRecord.user_id == user.id, FileRecord.kind == "docx")
+        .order_by(FileRecord.id.desc())
+        .limit(100)
+    )
+    records = result.scalars().all()
+    items = []
+    for record in records:
+        item = _doc_out(record).model_dump()
+        item["parent_id"] = record.parent_id
+        item["created_at"] = record.created_at
+        items.append(item)
+    return {"items": items}
 
 
 @router.post("/docs/upload", response_model=DocOut, status_code=201)

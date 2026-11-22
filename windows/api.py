@@ -247,6 +247,45 @@ class YunaAPI:
     def log_food(self, text: str) -> dict:
         return self._request("POST", "/api/v1/food/log", json={"text": text})
 
+    # ---------- hujjatlar ----------
+    def documents(self) -> list[dict]:
+        return self._request("GET", "/api/v1/docs").get("items", [])
+
+    def upload_document(self, path: str) -> dict:
+        with open(path, "rb") as handle:
+            data = handle.read()
+        return self._request(
+            "POST",
+            "/api/v1/docs/upload",
+            files={
+                "file": (
+                    os.path.basename(path),
+                    data,
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                )
+            },
+            timeout=300,
+        )
+
+    def edit_document(self, file_id: int, instruction: str) -> dict:
+        return self._request(
+            "POST",
+            "/api/v1/docs/edit",
+            json={"file_id": file_id, "instruction": instruction},
+            timeout=300,
+        )
+
+    def download_document(self, file_id: int, target: str) -> None:
+        response = self.client.get(
+            f"/api/v1/docs/{file_id}/download",
+            headers=self._headers(),
+            follow_redirects=True,
+            timeout=300,
+        )
+        if response.status_code >= 400:
+            self._raise(response)
+        Path(target).write_bytes(response.content)
+
     # ---------- maslahat ----------
     def advice_today(self) -> dict:
         return self._request("GET", "/api/v1/advice/today")
@@ -257,7 +296,6 @@ class YunaAPI:
 
     def admin_stats(self) -> dict:
         return self._request("GET", "/api/v1/admin/stats")
-
 
     def close(self) -> None:
         self.client.close()

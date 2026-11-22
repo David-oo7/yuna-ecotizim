@@ -1,15 +1,21 @@
 package uz.yuna.app
 
 import android.Manifest
+import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.MediaStore
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -17,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -24,10 +31,14 @@ import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Lightbulb
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Send
@@ -37,7 +48,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -50,19 +66,28 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
 
-private val ACCENT = Color(0xFF7C5CFF)
-private val SOFT = Color(0xFFEDE9FF)
-private val INK = Color(0xFF1A1A1A)
-private val MUTED = Color(0xFF6B6B80)
+private val ACCENT = Color(0xFF8B6CFF)
+private val ACCENT_DEEP = Color(0xFF6A45E8)
+private val SOFT = Color(0xFF2A2840)
+private val INK = Color(0xFFEDEDF5)
+private val MUTED = Color(0xFF8E8EA8)
+private val SURFACE = Color(0xFF1F1F2C)
+private val SURFACE_HI = Color(0xFF262636)
+private val BG_DARK = Color(0xFF14141C)
+private val TEAL = Color(0xFF3FD7C4)
+private val GREEN = Color(0xFF6BE39B)
 
 private val MEAL_LABELS = mapOf(
     "breakfast" to "Nonushta",
@@ -72,18 +97,31 @@ private val MEAL_LABELS = mapOf(
 )
 
 private enum class Tabs(val title: String, val icon: ImageVector) {
-    CHAT("Suhbat", Icons.Filled.Chat),
+    HOME("Bugun", Icons.Filled.Home),
+    CHAT("Chat", Icons.Filled.Chat),
     REMINDERS("Eslatmalar", Icons.Filled.Notifications),
     FOOD("Ovqat", Icons.Filled.Restaurant),
-    ADVICE("Maslahat", Icons.Filled.Lightbulb),
-    SETTINGS("Sozlamalar", Icons.Filled.Settings),
+    PROFILE("Profil", Icons.Filled.Person),
 }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme(primary = ACCENT)) {
+            MaterialTheme(
+                colorScheme = darkColorScheme(
+                    primary = ACCENT,
+                    onPrimary = Color.White,
+                    secondary = TEAL,
+                    background = BG_DARK,
+                    onBackground = INK,
+                    surface = SURFACE,
+                    onSurface = INK,
+                    surfaceVariant = SURFACE_HI,
+                    onSurfaceVariant = MUTED,
+                    outline = Color(0xFF34344A),
+                ),
+            ) {
                 YunaApp()
             }
         }
@@ -212,41 +250,71 @@ private fun MainShell(
     onUser: (UserDto) -> Unit,
     onLogout: () -> Unit,
 ) {
-    var tab by remember { mutableStateOf(Tabs.CHAT) }
-    var adminOpen by remember { mutableStateOf(false) }
+    var tab by remember { mutableStateOf(Tabs.HOME) }
+    var overlay by remember { mutableStateOf<String?>(null) }
+    var startVoice by remember { mutableStateOf(false) }
 
     Scaffold(
-        containerColor = Color(0xFFF7F6FC),
+        containerColor = BG_DARK,
         bottomBar = {
-            NavigationBar(containerColor = Color.White) {
+            NavigationBar(containerColor = SURFACE, tonalElevation = 0.dp) {
                 Tabs.entries.forEach { item ->
                     NavigationBarItem(
-                        selected = tab == item && !adminOpen,
+                        selected = tab == item && overlay == null,
                         onClick = {
-                            adminOpen = false
+                            overlay = null
                             tab = item
                         },
-                        icon = { Icon(item.icon, contentDescription = item.title) },
-                        label = { Text(item.title, fontSize = 11.sp) },
+                        icon = {
+                            Icon(
+                                item.icon,
+                                contentDescription = item.title,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        },
+                        label = { Text(item.title, fontSize = 9.sp, maxLines = 1) },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = TEAL,
+                            selectedTextColor = TEAL,
+                            unselectedIconColor = MUTED,
+                            unselectedTextColor = MUTED,
+                            indicatorColor = Color.Transparent,
+                        ),
                     )
                 }
             }
         },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            if (adminOpen) {
-                AdminScreen(session) { adminOpen = false }
-            } else when (tab) {
-                Tabs.CHAT -> ChatScreen(session, user)
-                Tabs.REMINDERS -> RemindersScreen(session)
-                Tabs.FOOD -> FoodScreen(session)
-                Tabs.ADVICE -> AdviceScreen(session)
-                Tabs.SETTINGS -> SettingsScreen(
+        Box(Modifier.fillMaxSize().padding(padding).background(BG_DARK)) {
+            when {
+                overlay == "admin" -> AdminScreen(session) { overlay = null }
+                overlay == "docs" -> DocumentsScreen(session) { overlay = null }
+                tab == Tabs.HOME -> HomeScreen(
+                    session = session,
+                    user = user,
+                    onOpenDocs = { overlay = "docs" },
+                    onOpenReminders = { tab = Tabs.REMINDERS },
+                    onOpenFood = { tab = Tabs.FOOD },
+                    onOpenChat = { tab = Tabs.CHAT },
+                    onVoice = {
+                        startVoice = true
+                        tab = Tabs.CHAT
+                    },
+                )
+                tab == Tabs.CHAT -> ChatScreen(
+                    session = session,
+                    user = user,
+                    startVoice = startVoice,
+                    onVoiceHandled = { startVoice = false },
+                )
+                tab == Tabs.REMINDERS -> RemindersScreen(session)
+                tab == Tabs.FOOD -> FoodScreen(session)
+                else -> SettingsScreen(
                     session = session,
                     user = user,
                     onUser = onUser,
                     onLogout = onLogout,
-                    onOpenAdmin = { adminOpen = true },
+                    onOpenAdmin = { overlay = "admin" },
                 )
             }
         }
@@ -255,15 +323,356 @@ private fun MainShell(
 
 @Composable
 private fun sectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color.White),
-        shape = RoundedCornerShape(16.dp),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SURFACE, RoundedCornerShape(20.dp))
+            .padding(16.dp),
     ) {
-        Column(Modifier.padding(16.dp)) {
-            Text(title, fontWeight = FontWeight.SemiBold, color = INK)
-            Spacer(Modifier.height(10.dp))
-            content()
+        Text(title, fontWeight = FontWeight.SemiBold, color = INK)
+        Spacer(Modifier.height(10.dp))
+        content()
+    }
+}
+
+// --------------------------- BUGUN (UY) ---------------------------
+private val MONTHS_UZ = listOf(
+    "yanvar", "fevral", "mart", "aprel", "may", "iyun",
+    "iyul", "avgust", "sentabr", "oktabr", "noyabr", "dekabr",
+)
+
+private fun todayUz(): String {
+    val now = java.time.LocalDate.now()
+    return "Bugun ${now.dayOfMonth}-${MONTHS_UZ[now.monthValue - 1]}, ${now.year}-yil"
+}
+
+private fun friendlyMoment(value: String): String {
+    val moment = runCatching {
+        OffsetDateTime.parse(value).atZoneSameInstant(java.time.ZoneId.systemDefault())
+    }.getOrNull() ?: return value
+    val days = java.time.temporal.ChronoUnit.DAYS.between(
+        java.time.LocalDate.now(),
+        moment.toLocalDate(),
+    )
+    val prefix = when (days) {
+        0L -> "Bugun"
+        1L -> "Ertaga"
+        -1L -> "Kecha"
+        else -> moment.format(DateTimeFormatter.ofPattern("dd.MM"))
+    }
+    return "$prefix ${moment.format(DateTimeFormatter.ofPattern("HH:mm"))}"
+}
+
+@Composable
+private fun YunaLogo() {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(34.dp)
+                .background(Brush.linearGradient(listOf(TEAL, GREEN)), RoundedCornerShape(10.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("Y", color = Color(0xFF06231F), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+        }
+        Spacer(Modifier.width(10.dp))
+        Text("Yuna", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = TEAL)
+    }
+}
+
+@Composable
+private fun AvatarBadge(name: String?) {
+    Box(
+        Modifier.size(38.dp).background(ACCENT, CircleShape),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            name?.trim()?.take(1)?.uppercase() ?: "Y",
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun HomeScreen(
+    session: Session,
+    user: UserDto?,
+    onOpenDocs: () -> Unit,
+    onOpenReminders: () -> Unit,
+    onOpenFood: () -> Unit,
+    onOpenChat: () -> Unit,
+    onVoice: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var advice by remember { mutableStateOf<AdviceDto?>(null) }
+    var summary by remember { mutableStateOf<FoodSummaryDto?>(null) }
+    var nextReminder by remember { mutableStateOf<ReminderDto?>(null) }
+    var busy by remember { mutableStateOf(false) }
+
+    suspend fun load() {
+        busy = true
+        runCatching { Api.service.advice(session.bearer) }.onSuccess { advice = it }
+        runCatching { Api.service.foodSummary(session.bearer) }.onSuccess { summary = it }
+        runCatching { Api.service.reminders(session.bearer, "pending") }
+            .onSuccess { list -> nextReminder = list.items.minByOrNull { it.remindAt } }
+        busy = false
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            YunaLogo()
+            Spacer(Modifier.weight(1f))
+            AvatarBadge(user?.name)
+            Spacer(Modifier.width(10.dp))
+            Box(
+                Modifier.size(38.dp).background(SURFACE, RoundedCornerShape(12.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Notifications,
+                    contentDescription = "Bildirishnomalar",
+                    tint = MUTED,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+
+        Column {
+            Text("Xush kelibsiz!", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = INK)
+            Text(todayUz(), color = MUTED, fontSize = 13.sp)
+        }
+
+        AdviceCard(advice, busy) { scope.launch { load() } }
+
+        FoodBalanceCard(summary)
+
+        ReminderStrip(nextReminder, onOpenReminders)
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            QuickChip("\uD83D\uDCC4 Hujjatlar", onOpenDocs)
+            QuickChip("\uD83C\uDF7D Ovqat", onOpenFood)
+            QuickChip("\uD83D\uDCAC Chat", onOpenChat)
+        }
+
+        QuickMicCard(onVoice)
+
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .size(72.dp)
+                    .background(Brush.linearGradient(listOf(TEAL, GREEN)), CircleShape)
+                    .clickable { onVoice() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Mic,
+                    contentDescription = "Mikrofon",
+                    tint = Color(0xFF06231F),
+                    modifier = Modifier.size(32.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun AdviceCard(advice: AdviceDto?, busy: Boolean, onRefresh: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(Brush.linearGradient(listOf(ACCENT, ACCENT_DEEP)), RoundedCornerShape(20.dp))
+            .padding(16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(30.dp).background(Color(0x33FFFFFF), RoundedCornerShape(9.dp)),
+                contentAlignment = Alignment.Center,
+            ) { Text("\u2726", color = Color.White, fontSize = 16.sp) }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "Bugungi Maslahat",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 16.sp,
+                modifier = Modifier.weight(1f),
+            )
+            Box(
+                Modifier
+                    .size(30.dp)
+                    .background(Color(0x33FFFFFF), RoundedCornerShape(9.dp))
+                    .clickable(enabled = !busy) { onRefresh() },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Refresh,
+                    contentDescription = "Yangilash",
+                    tint = Color.White,
+                    modifier = Modifier.size(17.dp),
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            when {
+                busy && advice == null -> "Yuklanmoqda..."
+                else -> advice?.text ?: "Maslahat hozircha yo'q."
+            },
+            color = Color(0xFFF3F0FF),
+            fontSize = 14.sp,
+            lineHeight = 20.sp,
+        )
+    }
+}
+
+@Composable
+private fun FoodBalanceCard(summary: FoodSummaryDto?) {
+    val totals = summary?.totals ?: emptyMap()
+    val kcal = (totals["kcal"] ?: 0.0).toFloat()
+    val goal = (summary?.goalKcal ?: 2200).toFloat()
+    Column(
+        Modifier.fillMaxWidth().background(SURFACE, RoundedCornerShape(20.dp)).padding(16.dp),
+    ) {
+        Text("Ovqat balansi", fontWeight = FontWeight.SemiBold, color = INK, fontSize = 15.sp)
+        Spacer(Modifier.height(12.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            KcalDonut(kcal, goal, Modifier.size(142.dp))
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                MacroBar("Oqsil", (totals["protein"] ?: 0.0).toFloat(), 120f, TEAL)
+                MacroBar("Yog'", (totals["fat"] ?: 0.0).toFloat(), 80f, GREEN)
+                MacroBar("Uglevod", (totals["carbs"] ?: 0.0).toFloat(), 250f, ACCENT)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("Raqamlar taxminiy.", color = MUTED, fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun KcalDonut(consumed: Float, goal: Float, modifier: Modifier = Modifier) {
+    val ratio = if (goal > 0f) (consumed / goal).coerceIn(0f, 1f) else 0f
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = size.minDimension * 0.075f
+            val inset = stroke / 2f + 2f
+            val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
+            drawArc(
+                color = SURFACE_HI,
+                startAngle = 90f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = Offset(inset, inset),
+                size = arcSize,
+                style = Stroke(width = stroke, cap = StrokeCap.Round),
+            )
+            if (ratio > 0f) {
+                drawArc(
+                    brush = Brush.linearGradient(listOf(TEAL, GREEN)),
+                    startAngle = 90f,
+                    sweepAngle = -360f * ratio,
+                    useCenter = false,
+                    topLeft = Offset(inset, inset),
+                    size = arcSize,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+            }
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("Kkal", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = INK)
+            Text("(${consumed.toInt()} / ${goal.toInt()} kcal)", fontSize = 9.sp, color = MUTED)
+        }
+    }
+}
+
+@Composable
+private fun MacroBar(label: String, value: Float, target: Float, color: Color) {
+    val ratio = if (target > 0f) (value / target).coerceIn(0f, 1f) else 0f
+    Column(Modifier.fillMaxWidth()) {
+        Row {
+            Text(label, color = INK, fontSize = 13.sp)
+            Spacer(Modifier.weight(1f))
+            Text("${value.toInt()} g", color = MUTED, fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(5.dp))
+        Box(
+            Modifier.fillMaxWidth().height(8.dp).background(SURFACE_HI, RoundedCornerShape(4.dp)),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth(ratio.coerceAtLeast(0.02f))
+                    .fillMaxHeight()
+                    .background(
+                        Brush.horizontalGradient(listOf(TEAL, color)),
+                        RoundedCornerShape(4.dp),
+                    ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ReminderStrip(reminder: ReminderDto?, onOpen: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(SURFACE, RoundedCornerShape(20.dp))
+            .clickable { onOpen() }
+            .padding(16.dp),
+    ) {
+        Text("Eng yaqin eslatma", fontWeight = FontWeight.SemiBold, color = INK, fontSize = 15.sp)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            reminder?.let { "${friendlyMoment(it.remindAt)} \u00b7 ${it.text}" }
+                ?: "Hozircha eslatma yo'q. Yangi eslatma qo'shing.",
+            color = MUTED,
+            fontSize = 13.sp,
+        )
+    }
+}
+
+@Composable
+private fun QuickChip(label: String, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .background(SURFACE, RoundedCornerShape(12.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Text(label, color = INK, fontSize = 13.sp)
+    }
+}
+
+@Composable
+private fun QuickMicCard(onVoice: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(SURFACE, RoundedCornerShape(20.dp))
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Tezkor mikrofon", color = INK, fontSize = 15.sp, modifier = Modifier.weight(1f))
+        Box(
+            Modifier
+                .size(48.dp)
+                .background(
+                    Brush.linearGradient(listOf(ACCENT, ACCENT_DEEP)),
+                    RoundedCornerShape(14.dp),
+                )
+                .clickable { onVoice() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Mic, contentDescription = "Mikrofon", tint = Color.White)
         }
     }
 }
@@ -272,7 +681,12 @@ private fun sectionCard(title: String, content: @Composable ColumnScope.() -> Un
 data class UiMessage(val role: String, val text: String)
 
 @Composable
-private fun ChatScreen(session: Session, user: UserDto?) {
+private fun ChatScreen(
+    session: Session,
+    user: UserDto?,
+    startVoice: Boolean = false,
+    onVoiceHandled: () -> Unit = {},
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val json = remember { Json { ignoreUnknownKeys = true } }
@@ -350,23 +764,38 @@ private fun ChatScreen(session: Session, user: UserDto?) {
         }
     }
 
+    LaunchedEffect(startVoice) {
+        if (startVoice) {
+            onVoiceHandled()
+            val granted = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            when {
+                recording != null -> Unit
+                granted -> startRecording()
+                else -> recordPermission.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+    }
+
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
 
     Column(Modifier.fillMaxSize()) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("Yuna", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = ACCENT)
-                Text(
-                    user?.name?.let { "Salom, $it" } ?: "Sizning shaxsiy yordamchingiz",
-                    color = MUTED,
-                    fontSize = 12.sp,
-                )
-            }
+            YunaLogo()
+            Spacer(Modifier.weight(1f))
+            Text(
+                user?.name?.let { "Salom, $it" } ?: "Shaxsiy yordamchingiz",
+                color = MUTED,
+                fontSize = 12.sp,
+            )
+            Spacer(Modifier.width(10.dp))
+            AvatarBadge(user?.name)
         }
 
         LazyColumn(
@@ -447,7 +876,7 @@ private fun MessageBubble(message: UiMessage) {
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
         Surface(
-            color = if (isUser) ACCENT else Color(0xFFF0F0F5),
+            color = if (isUser) ACCENT else SURFACE_HI,
             shape = RoundedCornerShape(14.dp),
             modifier = Modifier.widthIn(max = 300.dp),
         ) {
@@ -547,7 +976,7 @@ private fun RemindersScreen(session: Session) {
                         Icon(Icons.Filled.Delete, contentDescription = "O'chirish", tint = Color(0xFFC0392B))
                     }
                 }
-                HorizontalDivider(color = Color(0xFFF0EFF7))
+                HorizontalDivider(color = Color(0xFF2B2B3D))
             }
         }
     }
@@ -581,22 +1010,7 @@ private fun FoodScreen(session: Session) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        sectionCard("Bugungi hisob") {
-            val totals = summary?.totals ?: emptyMap()
-            Text(
-                "${(totals["kcal"] ?: 0.0).toInt()} / ${summary?.goalKcal ?: 0} kkal",
-                fontSize = 26.sp,
-                fontWeight = FontWeight.Bold,
-                color = ACCENT,
-            )
-            Text(
-                "Oqsil ${(totals["protein"] ?: 0.0).toInt()} g · " +
-                    "Yog' ${(totals["fat"] ?: 0.0).toInt()} g · " +
-                    "Uglevod ${(totals["carbs"] ?: 0.0).toInt()} g",
-                color = MUTED,
-                fontSize = 13.sp,
-            )
-        }
+        FoodBalanceCard(summary)
 
         sectionCard("Taom qo'shish") {
             OutlinedTextField(
@@ -645,52 +1059,207 @@ private fun FoodScreen(session: Session) {
                     )
                     Text("${meal.items} ta · ${meal.kcal.toInt()} kkal", color = MUTED, fontSize = 13.sp)
                 }
-                HorizontalDivider(color = Color(0xFFF0EFF7))
+                HorizontalDivider(color = Color(0xFF2B2B3D))
             }
         }
     }
 }
 
-// --------------------------- MASLAHAT ---------------------------
+// --------------------------- HUJJAT (WORD) ---------------------------
 @Composable
-private fun AdviceScreen(session: Session) {
+private fun DocumentsScreen(session: Session, onBack: () -> Unit) {
+    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var advice by remember { mutableStateOf<AdviceDto?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
+    var docs by remember { mutableStateOf<List<DocDto>>(emptyList()) }
+    var selected by remember { mutableStateOf<DocDto?>(null) }
+    var pickedUri by remember { mutableStateOf<Uri?>(null) }
+    var pickedName by remember { mutableStateOf<String?>(null) }
+    var instruction by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
 
     suspend fun load() {
-        busy = true
-        runCatching { Api.service.advice(session.bearer) }
-            .onSuccess { advice = it; error = null }
+        runCatching { Api.service.docs(session.bearer) }
+            .onSuccess { docs = it.items }
             .onFailure { error = it.message }
-        busy = false
     }
 
     LaunchedEffect(Unit) { load() }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            pickedUri = uri
+            pickedName = documentName(context, uri)
+            message = null
+            error = null
+        }
+    }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        sectionCard("Kunlik maslahat") {
-            Text(advice?.date ?: "", color = MUTED, fontSize = 12.sp)
-            Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Filled.ArrowBack, contentDescription = "Orqaga", tint = INK)
+            }
+            Text("Hujjatlar", fontWeight = FontWeight.SemiBold, fontSize = 18.sp, color = INK)
+        }
+
+        sectionCard("Word fayl yuklash") {
             Text(
-                when {
-                    busy && advice == null -> "Yuklanmoqda..."
-                    error != null -> "Xatolik: $error"
-                    else -> advice?.text ?: ""
-                },
-                fontSize = 15.sp,
-                color = INK,
+                pickedName ?: "Fayl tanlanmagan",
+                color = if (pickedName == null) MUTED else INK,
+                fontSize = 13.sp,
             )
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = { scope.launch { load() } }, enabled = !busy) {
-                Text("Yangilash")
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = !busy) {
+                    Text("Fayl tanlash")
+                }
+                Button(
+                    onClick = {
+                        val uri = pickedUri ?: return@Button
+                        scope.launch {
+                            busy = true
+                            error = null
+                            message = null
+                            runCatching { uploadDocument(session, context, uri) }
+                                .onSuccess { doc ->
+                                    selected = doc
+                                    pickedUri = null
+                                    pickedName = null
+                                    message = "Yuklandi: ${doc.originalName} (v${doc.version})"
+                                    load()
+                                }
+                                .onFailure { error = it.message }
+                            busy = false
+                        }
+                    },
+                    enabled = !busy && pickedUri != null,
+                ) { Text(if (busy) "Kuting..." else "Yuklash") }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text("Faqat .docx fayl qabul qilinadi.", color = MUTED, fontSize = 12.sp)
+        }
+
+        sectionCard("AI bilan tahrirlash") {
+            Text(
+                selected?.let { "Tanlangan: ${it.originalName} (v${it.version})" }
+                    ?: "Tahrirlash uchun hujjat tanlanmagan",
+                color = MUTED,
+                fontSize = 12.sp,
+            )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = instruction,
+                onValueChange = { instruction = it },
+                label = { Text("Masalan: matnni rasmiy uslubda qayta yoz") },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 3,
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    val doc = selected ?: return@Button
+                    scope.launch {
+                        busy = true
+                        error = null
+                        message = null
+                        runCatching {
+                            Api.service.editDoc(
+                                session.bearer,
+                                DocEditRequest(doc.fileId, instruction.trim()),
+                            )
+                        }.onSuccess { newDoc ->
+                            selected = newDoc
+                            instruction = ""
+                            message = "Yangi versiya tayyor: v${newDoc.version}"
+                            load()
+                        }.onFailure { error = it.message }
+                        busy = false
+                    }
+                },
+                enabled = !busy && selected != null && instruction.trim().length >= 2,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (busy) "Tahrirlanmoqda..." else "Tahrirlash") }
+            message?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, color = Color(0xFF2E7D32), fontSize = 12.sp)
+            }
+            error?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
             }
         }
+
+        sectionCard("Hujjatlar va versiyalar (${docs.size})") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Har bir versiya alohida qator", color = MUTED, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                IconButton(onClick = { scope.launch { load() } }) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "Yangilash", tint = ACCENT)
+                }
+            }
+            if (docs.isEmpty()) {
+                Text("Hozircha hujjat yo'q.", color = MUTED, fontSize = 13.sp)
+            }
+            docs.forEach { doc ->
+                val isSelected = selected?.fileId == doc.fileId
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { selected = doc }
+                        .background(if (isSelected) SOFT else Color.Transparent, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(doc.originalName, color = INK, fontSize = 14.sp)
+                        Text(
+                            "v${doc.version} · ${doc.sizeBytes / 1024} KB · " + formatMomentFlexible(doc.createdAt),
+                            color = MUTED,
+                            fontSize = 12.sp,
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            scope.launch {
+                                busy = true
+                                error = null
+                                message = null
+                                runCatching { withContext(Dispatchers.IO) { downloadDocument(session, context, doc) } }
+                                    .onSuccess { message = "Saqlandi: $it" }
+                                    .onFailure { error = it.message }
+                                busy = false
+                            }
+                        },
+                        enabled = !busy,
+                    ) {
+                        Icon(Icons.Filled.Download, contentDescription = "Yuklab olish", tint = ACCENT)
+                    }
+                }
+                HorizontalDivider(color = Color(0xFF2B2B3D))
+            }
+        }
+        Spacer(Modifier.height(16.dp))
     }
+}
+
+private fun formatMomentFlexible(value: String?): String {
+    if (value.isNullOrBlank()) return ""
+    val pattern = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+    runCatching {
+        return OffsetDateTime.parse(value)
+            .atZoneSameInstant(java.time.ZoneId.systemDefault())
+            .format(pattern)
+    }
+    return runCatching {
+        java.time.LocalDateTime.parse(value)
+            .atZone(java.time.ZoneOffset.UTC)
+            .withZoneSameInstant(java.time.ZoneId.systemDefault())
+            .format(pattern)
+    }.getOrDefault(value)
 }
 
 // --------------------------- SOZLAMALAR ---------------------------
@@ -966,7 +1535,7 @@ private fun AdminScreen(session: Session, onBack: () -> Unit) {
                         fontSize = 12.sp,
                     )
                 }
-                HorizontalDivider(color = Color(0xFFF0EFF7))
+                HorizontalDivider(color = Color(0xFF2B2B3D))
             }
         }
         Spacer(Modifier.height(16.dp))
@@ -978,6 +1547,80 @@ private fun StatItem(label: String, value: Int) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(value.toString(), fontSize = 22.sp, fontWeight = FontWeight.Bold, color = ACCENT)
         Text(label, fontSize = 11.sp, color = MUTED)
+    }
+}
+
+// --------------------------- HUJJAT YUBORISH/YUKLASH ---------------------------
+private const val DOCX_MIME =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+private fun documentName(context: Context, uri: Uri): String {
+    runCatching {
+        context.contentResolver
+            .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+    }.getOrNull()?.let { return it }
+    return "hujjat.docx"
+}
+
+private fun serverErrorMessage(body: String): String = runCatching {
+    Json { ignoreUnknownKeys = true }
+        .parseToJsonElement(body)
+        .jsonObject["error"]
+        ?.jsonObject
+        ?.get("message")
+        ?.jsonPrimitive
+        ?.content
+}.getOrNull() ?: "Server xatosi"
+
+private fun uploadDocument(session: Session, context: Context, uri: Uri): DocDto {
+    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        ?: error("Faylni o'qib bo'lmadi")
+    val name = documentName(context, uri)
+    val body = MultipartBody.Builder()
+        .setType(MultipartBody.FORM)
+        .addFormDataPart("file", name, bytes.toRequestBody(DOCX_MIME.toMediaType()))
+        .build()
+    val request = Request.Builder()
+        .url(Api.currentBaseUrl().trimEnd('/') + "/api/v1/docs/upload")
+        .addHeader("Authorization", session.bearer)
+        .post(body)
+        .build()
+
+    OkHttpClient().newCall(request).execute().use { response ->
+        val text = response.body?.string().orEmpty()
+        if (!response.isSuccessful) error(serverErrorMessage(text))
+        return Json { ignoreUnknownKeys = true }.decodeFromString(DocDto.serializer(), text)
+    }
+}
+
+private fun downloadDocument(session: Session, context: Context, doc: DocDto): String {
+    val request = Request.Builder()
+        .url(Api.currentBaseUrl().trimEnd('/') + "/api/v1/docs/${doc.fileId}/download")
+        .addHeader("Authorization", session.bearer)
+        .build()
+
+    OkHttpClient().newCall(request).execute().use { response ->
+        val bytes = response.body?.bytes()
+        if (!response.isSuccessful || bytes == null) error("Yuklab bo'lmadi (${response.code})")
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, doc.originalName)
+                put(MediaStore.Downloads.MIME_TYPE, DOCX_MIME)
+            }
+            val target = context.contentResolver
+                .insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: error("Saqlash joyi topilmadi")
+            context.contentResolver.openOutputStream(target)?.use { it.write(bytes) }
+                ?: error("Faylni yozib bo'lmadi")
+            return "Download/${doc.originalName}"
+        }
+
+        val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.cacheDir
+        val file = File(dir, doc.originalName)
+        file.writeBytes(bytes)
+        return file.absolutePath
     }
 }
 

@@ -178,6 +178,27 @@ data class FoodLogResponse(
     val items: List<FoodItemDto> = emptyList(),
 )
 
+// ---------------- Hujjat (Word) ----------------
+@Serializable
+data class DocDto(
+    @SerialName("file_id") val fileId: Int,
+    val version: Int = 1,
+    @SerialName("original_name") val originalName: String,
+    @SerialName("size_bytes") val sizeBytes: Long = 0,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("download_url") val downloadUrl: String? = null,
+    @SerialName("parent_id") val parentId: Int? = null,
+)
+
+@Serializable
+data class DocList(val items: List<DocDto> = emptyList())
+
+@Serializable
+data class DocEditRequest(
+    @SerialName("file_id") val fileId: Int,
+    val instruction: String,
+)
+
 // ---------------- Maslahat / admin ----------------
 @Serializable
 data class AdviceDto(val date: String, val text: String)
@@ -274,6 +295,15 @@ interface YunaService {
 
     @GET("api/v1/advice/today")
     suspend fun advice(@Header("Authorization") bearer: String): AdviceDto
+
+    @GET("api/v1/docs")
+    suspend fun docs(@Header("Authorization") bearer: String): DocList
+
+    @POST("api/v1/docs/edit")
+    suspend fun editDoc(
+        @Header("Authorization") bearer: String,
+        @Body body: DocEditRequest,
+    ): DocDto
 
     @GET("api/v1/admin/users")
     suspend fun adminUsers(@Header("Authorization") bearer: String): AdminUserList

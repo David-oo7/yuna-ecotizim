@@ -1,6 +1,6 @@
 """Y.U.N.A — Windows ilovasi (PySide6).
 
-Bo'limlar: Suhbat, Eslatmalar, Ovqat, Maslahat, Sozlamalar (+ Admin).
+Bo'limlar: Bugun, Chat, Eslatmalar, Ovqat, Hujjat, Maslahat, Sozlamalar (+ Admin).
 
 Ishga tushirish:
     pip install -r requirements.txt
@@ -17,12 +17,23 @@ import sys
 from datetime import datetime
 
 from PySide6.QtCore import QDateTime, Qt, QThread, QTime, Signal
-from PySide6.QtGui import QFont, QIcon, QTextCursor
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QConicalGradient,
+    QFont,
+    QIcon,
+    QPainter,
+    QPen,
+    QPixmap,
+    QTextCursor,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QComboBox,
     QDateTimeEdit,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -32,6 +43,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -48,10 +60,16 @@ from PySide6.QtWidgets import (
 from api import ApiError, YunaAPI
 
 BASE_URL = os.getenv("YUNA_API_URL", "http://127.0.0.1:8000")
-ACCENT = "#7C5CFF"
-ACCENT_SOFT = "#EDE9FF"
-BG = "#F5F4FB"
-MUTED = "#6B6B80"
+ACCENT = "#8B6CFF"
+ACCENT_SOFT = "#2B2840"
+TEAL = "#3FD7C4"
+GREEN = "#6BE39B"
+BG = "#14141C"
+SIDEBAR_BG = "#1A1A26"
+CARD_BG = "#1F1F2C"
+CARD_BORDER = "#2B2B3D"
+TEXT = "#ECECF5"
+MUTED = "#8E8EA8"
 
 MEAL_LABELS = {
     "breakfast": "Nonushta",
@@ -63,44 +81,81 @@ LANGUAGES = {"uz": "O'zbekcha", "ru": "Русский", "en": "English"}
 TIMEZONES = ["Asia/Tashkent", "Asia/Samarkand", "Asia/Almaty", "Europe/Moscow", "UTC"]
 
 QSS = f"""
-QWidget {{ background: {BG}; color: #1A1A1A; font-family: "Segoe UI", sans-serif; }}
-QLabel, QCheckBox {{ background: transparent; }}
-QFrame#sidebar {{ background: white; border: none; }}
-QFrame#card {{ background: white; border: 1px solid #ECEBF5; border-radius: 14px; }}
-QLabel#cardTitle {{ font-size: 15px; font-weight: 600; color: #1A1A1A; }}
-QLabel#brand {{ font-size: 20px; font-weight: 700; color: {ACCENT}; }}
-QLabel#muted {{ color: {MUTED}; }}
-QLabel#big {{ font-size: 26px; font-weight: 700; color: {ACCENT}; }}
-QPushButton#nav {{
-    text-align: left; padding: 10px 14px; border: none; border-radius: 10px;
-    background: transparent; color: #444; font-size: 14px;
+QWidget {{ background: {BG}; color: {TEXT}; font-family: "Segoe UI", sans-serif; font-size: 13px; }}
+QLabel, QCheckBox, QRadioButton {{ background: transparent; }}
+QFrame#sidebar {{ background: {SIDEBAR_BG}; border: none; }}
+QFrame#card {{ background: {CARD_BG}; border: 1px solid {CARD_BORDER}; border-radius: 16px; }}
+QFrame#advice {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #8B6CFF, stop:1 #6A45E8);
+    border: none; border-radius: 18px;
 }}
-QPushButton#nav:hover {{ background: {ACCENT_SOFT}; }}
-QPushButton#nav:checked {{ background: {ACCENT_SOFT}; color: {ACCENT}; font-weight: 600; }}
+QLabel#cardTitle {{ font-size: 15px; font-weight: 600; color: {TEXT}; }}
+QLabel#brand {{ font-size: 25px; font-weight: 800; color: {TEAL}; }}
+QLabel#welcome {{ font-size: 27px; font-weight: 800; color: {TEXT}; }}
+QLabel#muted {{ color: {MUTED}; }}
+QLabel#big {{ font-size: 26px; font-weight: 700; color: {TEXT}; }}
+QLabel#adviceTitle {{ color: white; font-size: 17px; font-weight: 700; }}
+QLabel#adviceText {{ color: #F2EFFF; font-size: 14px; }}
+QLabel#avatar {{
+    background: #2A2A3C; border: 2px solid #3B3B52; border-radius: 21px; font-size: 20px;
+}}
+QPushButton#nav {{
+    text-align: left; padding: 10px 14px; border: none; border-radius: 12px;
+    background: transparent; color: #B9B9CE; font-size: 14px;
+}}
+QPushButton#nav:hover {{ background: #232332; color: {TEXT}; }}
+QPushButton#nav:checked {{ background: {ACCENT_SOFT}; color: white; font-weight: 600; }}
 QPushButton {{
-    padding: 9px 16px; border-radius: 9px; border: 1px solid #DEDCEA;
-    background: white; color: #333;
+    padding: 9px 16px; border-radius: 11px; border: 1px solid #34344A;
+    background: #262636; color: {TEXT};
 }}
 QPushButton:hover {{ border-color: {ACCENT}; }}
 QPushButton#primary {{
     background: {ACCENT}; color: white; border: none; font-weight: 600;
 }}
-QPushButton#primary:hover {{ background: #6B4BE8; }}
-QPushButton#danger {{ color: #C0392B; border-color: #F2C9C4; }}
-QLineEdit, QComboBox, QSpinBox, QTimeEdit, QDateTimeEdit {{
-    background: white; border: 1px solid #DEDCEA; border-radius: 9px;
-    padding: 8px 10px; min-height: 20px;
+QPushButton#primary:hover {{ background: #7A57F5; }}
+QPushButton#gradient {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 {TEAL}, stop:1 {GREEN});
+    color: #06231F; border: none; border-radius: 12px; font-weight: 700; padding: 11px 18px;
 }}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus {{ border-color: {ACCENT}; }}
+QPushButton#chip {{
+    background: #262636; border: 1px solid #34344A; border-radius: 12px;
+    padding: 10px 14px; color: {TEXT};
+}}
+QPushButton#ghost {{
+    background: rgba(255, 255, 255, 38); border: none; border-radius: 10px;
+    color: white; padding: 4px 8px; font-size: 16px;
+}}
+QPushButton#danger {{ color: #FF8A80; border-color: #5A3236; background: transparent; }}
+QLineEdit, QComboBox, QSpinBox, QTimeEdit, QDateTimeEdit {{
+    background: #262636; border: 1px solid #34344A; border-radius: 11px;
+    padding: 8px 10px; min-height: 20px; selection-background-color: {ACCENT};
+}}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QTimeEdit:focus, QDateTimeEdit:focus {{
+    border-color: {ACCENT};
+}}
+QComboBox QAbstractItemView {{
+    background: #262636; color: {TEXT}; border: 1px solid #34344A;
+    selection-background-color: {ACCENT_SOFT};
+}}
 QListWidget, QTableWidget, QTextBrowser {{
-    background: white; border: 1px solid #ECEBF5; border-radius: 12px;
+    background: #1B1B28; border: 1px solid {CARD_BORDER}; border-radius: 14px;
 }}
 QListWidget::item {{ padding: 8px; border-radius: 8px; }}
-QListWidget::item:selected {{ background: {ACCENT_SOFT}; color: {ACCENT}; }}
+QListWidget::item:selected {{ background: {ACCENT_SOFT}; color: white; }}
+QTableWidget {{ gridline-color: #262636; }}
+QTableWidget::item {{ padding: 6px; }}
+QTableWidget::item:selected {{ background: {ACCENT_SOFT}; color: white; }}
 QHeaderView::section {{
-    background: #FAFAFE; border: none; border-bottom: 1px solid #ECEBF5;
+    background: #22222F; border: none; border-bottom: 1px solid {CARD_BORDER};
     padding: 8px; color: {MUTED};
 }}
+QProgressBar {{ background: #2C2C3E; border: none; border-radius: 5px; }}
+QScrollBar:vertical {{ background: transparent; width: 10px; margin: 4px; }}
+QScrollBar::handle:vertical {{ background: #34344A; border-radius: 5px; min-height: 30px; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QScrollArea {{ border: none; background: transparent; }}
+QToolTip {{ background: #2B2B3D; color: {TEXT}; border: 1px solid #3A3A52; }}
 """
 
 
@@ -246,6 +301,274 @@ class LoginWindow(QWidget):
         self.close()
 
 
+# ----------------------------- Bugun (uy) -----------------------------
+MONTHS_UZ = [
+    "yanvar",
+    "fevral",
+    "mart",
+    "aprel",
+    "may",
+    "iyun",
+    "iyul",
+    "avgust",
+    "sentabr",
+    "oktabr",
+    "noyabr",
+    "dekabr",
+]
+
+
+class KcalRing(QWidget):
+    """Kkal halqasi: iste'mol qilingan va maqsad nisbati."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(176, 176)
+        self._consumed = 0.0
+        self._goal = 2200.0
+
+    def set_values(self, consumed: float, goal: float) -> None:
+        self._consumed = max(0.0, float(consumed or 0))
+        self._goal = float(goal or 0) or 2200.0
+        self.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        rect = self.rect().adjusted(15, 15, -15, -15)
+
+        track = QPen(QColor("#2C2C3E"), 13)
+        track.setCapStyle(Qt.RoundCap)
+        painter.setPen(track)
+        painter.drawArc(rect, 0, 360 * 16)
+
+        ratio = min(1.0, self._consumed / self._goal) if self._goal else 0.0
+        if ratio > 0:
+            gradient = QConicalGradient(rect.center(), 120)
+            gradient.setColorAt(0.0, QColor(TEAL))
+            gradient.setColorAt(0.55, QColor(GREEN))
+            gradient.setColorAt(1.0, QColor(TEAL))
+            arc = QPen(QBrush(gradient), 13)
+            arc.setCapStyle(Qt.RoundCap)
+            painter.setPen(arc)
+            painter.drawArc(rect, 90 * 16, int(-360 * 16 * ratio))
+
+        painter.setPen(QColor(TEXT))
+        painter.setFont(QFont("Segoe UI", 17, QFont.Bold))
+        painter.drawText(self.rect().adjusted(0, -18, 0, -18), Qt.AlignCenter, "Kkal")
+        painter.setPen(QColor(MUTED))
+        painter.setFont(QFont("Segoe UI", 8))
+        painter.drawText(
+            self.rect().adjusted(0, 32, 0, 32),
+            Qt.AlignCenter,
+            f"({self._consumed:.0f} / {self._goal:.0f} kcal)",
+        )
+
+
+def today_text() -> str:
+    now = datetime.now()
+    return f"Bugun {now.day}-{MONTHS_UZ[now.month - 1]}, {now.year}-yil"
+
+
+def reminder_text(value: str, text: str) -> str:
+    """Eslatma vaqtini 'Ertaga 09:00 dori ichish' ko'rinishida beradi."""
+    try:
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00")).astimezone()
+    except Exception:
+        return text
+    days = (moment.date() - datetime.now().astimezone().date()).days
+    if days == 0:
+        prefix = "Bugun"
+    elif days == 1:
+        prefix = "Ertaga"
+    elif days == -1:
+        prefix = "Kecha"
+    else:
+        prefix = moment.strftime("%d.%m")
+    return f"{prefix} {moment.strftime('%H:%M')} {text}"
+
+
+class HomePage(QWidget):
+    """Bugun: maslahat, ovqat balansi, eng yaqin eslatma va tezkor amallar."""
+
+    def __init__(self, api: YunaAPI, open_page, parent=None) -> None:
+        super().__init__(parent)
+        self.api = api
+        self.open_page = open_page
+        self._bars: dict[str, tuple[QProgressBar, QLabel]] = {}
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(14)
+
+        # --- sarlavha ---
+        header = QHBoxLayout()
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        user = api.user or {}
+        name = (user.get("name") or "").strip()
+        welcome = QLabel(f"Xush kelibsiz, {name}!" if name else "Xush kelibsiz!")
+        welcome.setObjectName("welcome")
+        date_label = QLabel(today_text())
+        date_label.setObjectName("muted")
+        titles.addWidget(welcome)
+        titles.addWidget(date_label)
+        header.addLayout(titles)
+        header.addStretch(1)
+        for emoji in ("\U0001f63a", "\U0001f638", "\U0001f63b"):
+            avatar = QLabel(emoji)
+            avatar.setObjectName("avatar")
+            avatar.setAlignment(Qt.AlignCenter)
+            avatar.setFixedSize(42, 42)
+            header.addWidget(avatar)
+        layout.addLayout(header)
+
+        # --- maslahat ---
+        advice = QFrame()
+        advice.setObjectName("advice")
+        advice_layout = QVBoxLayout(advice)
+        advice_layout.setContentsMargins(20, 16, 20, 18)
+        advice_layout.setSpacing(10)
+        advice_top = QHBoxLayout()
+        icon = QLabel()
+        pixmap = QPixmap(resource_path("icon.png"))
+        if not pixmap.isNull():
+            icon.setPixmap(pixmap.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        title = QLabel("Bugungi Maslahat")
+        title.setObjectName("adviceTitle")
+        refresh = QPushButton("\u21bb")
+        refresh.setObjectName("ghost")
+        refresh.setFixedSize(32, 28)
+        refresh.setCursor(Qt.PointingHandCursor)
+        refresh.clicked.connect(self.refresh)
+        advice_top.addWidget(icon)
+        advice_top.addWidget(title)
+        advice_top.addStretch(1)
+        advice_top.addWidget(refresh)
+        advice_layout.addLayout(advice_top)
+        self.advice_text = QLabel("Yuklanmoqda...")
+        self.advice_text.setObjectName("adviceText")
+        self.advice_text.setWordWrap(True)
+        advice_layout.addWidget(self.advice_text)
+        layout.addWidget(advice)
+
+        # --- ovqat balansi ---
+        balance, balance_layout = card_box()
+        balance_row = QHBoxLayout()
+        balance_row.setSpacing(22)
+        self.ring = KcalRing()
+        balance_row.addWidget(self.ring)
+        bars = QVBoxLayout()
+        bars.setSpacing(12)
+        for key, label, color, limit in (
+            ("protein", "Oqsil", TEAL, 120.0),
+            ("fat", "Yog'", GREEN, 80.0),
+            ("carbs", "Uglevod", "#7DE0A8", 250.0),
+        ):
+            holder = QWidget()
+            holder_layout = QVBoxLayout(holder)
+            holder_layout.setContentsMargins(0, 0, 0, 0)
+            holder_layout.setSpacing(5)
+            row = QHBoxLayout()
+            name = QLabel(label)
+            name.setStyleSheet(f"color: {TEXT}; font-size: 13px;")
+            value = QLabel("0 g")
+            value.setStyleSheet(f"color: {MUTED}; font-size: 12px;")
+            row.addWidget(name)
+            row.addStretch(1)
+            row.addWidget(value)
+            holder_layout.addLayout(row)
+            bar = QProgressBar()
+            bar.setRange(0, 100)
+            bar.setValue(0)
+            bar.setTextVisible(False)
+            bar.setFixedHeight(9)
+            bar.setStyleSheet(
+                "QProgressBar { background: #2C2C3E; border: none; border-radius: 5px; }"
+                f"QProgressBar::chunk {{ background: {color}; border-radius: 5px; }}"
+            )
+            holder_layout.addWidget(bar)
+            self._bars[key] = (bar, value)
+            bars.addWidget(holder)
+        bars.addStretch(1)
+        balance_row.addLayout(bars, 1)
+        balance_layout.addLayout(balance_row)
+        layout.addWidget(balance)
+
+        # --- eng yaqin eslatma va tezkor amallar ---
+        reminder, reminder_layout = card_box()
+        head = QLabel("Eng yaqin eslatma")
+        head.setStyleSheet(f"color: {TEXT}; font-size: 15px; font-weight: 600;")
+        self.reminder_text = QLabel("Yuklanmoqda...")
+        self.reminder_text.setObjectName("muted")
+        self.reminder_text.setWordWrap(True)
+        reminder_layout.addWidget(head)
+        reminder_layout.addWidget(self.reminder_text)
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        for text, target in (("\U0001f399  Ovoz", "Chat"), ("\U0001f5bc  Rasm", "Chat"), ("\U0001f4c4  Hujjat", "Hujjat")):
+            chip = QPushButton(text)
+            chip.setObjectName("chip")
+            chip.setCursor(Qt.PointingHandCursor)
+            chip.clicked.connect(lambda _=False, t=target: self.open_page(t))
+            actions.addWidget(chip)
+        actions.addStretch(1)
+        new_reminder = QPushButton("+  Yangi Eslatma")
+        new_reminder.setObjectName("gradient")
+        new_reminder.setCursor(Qt.PointingHandCursor)
+        new_reminder.clicked.connect(lambda: self.open_page("Eslatmalar"))
+        actions.addWidget(new_reminder)
+        reminder_layout.addLayout(actions)
+        layout.addWidget(reminder)
+
+        layout.addStretch(1)
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
+
+    # ---------- ma'lumot ----------
+    def _set_macro(self, key: str, value: float, limit: float) -> None:
+        bar, label = self._bars[key]
+        ratio = min(1.0, max(0.0, value / limit)) if limit else 0.0
+        bar.setValue(int(ratio * 100))
+        label.setText(f"{value:.0f} g")
+
+    def refresh(self) -> None:
+        try:
+            advice = self.api.advice_today()
+            self.advice_text.setText(advice.get("text") or "Maslahat hozircha yo'q.")
+        except ApiError:
+            self.advice_text.setText("Maslahatni yuklab bo'lmadi. Internet aloqasini tekshiring.")
+
+        data: dict = {}
+        try:
+            data = self.api.food_summary()
+        except ApiError:
+            pass
+        totals = data.get("totals", {}) if data else {}
+        goal = float((data or {}).get("goal_kcal") or 0)
+        self.ring.set_values(float(totals.get("kcal") or 0), goal or 2200)
+        self._set_macro("protein", float(totals.get("protein") or 0), 120.0)
+        self._set_macro("fat", float(totals.get("fat") or 0), 80.0)
+        self._set_macro("carbs", float(totals.get("carbs") or 0), 250.0)
+
+        try:
+            pending = [r for r in self.api.reminders() if r.get("status") == "pending"]
+        except ApiError:
+            pending = []
+        if pending:
+            first = min(pending, key=lambda r: str(r.get("remind_at") or ""))
+            self.reminder_text.setText(reminder_text(first.get("remind_at") or "", first.get("text") or ""))
+        else:
+            self.reminder_text.setText("Hozircha eslatma yo'q. Yangi eslatma qo'shing.")
+
+
 # ----------------------------- Suhbat -----------------------------
 class ChatPage(QWidget):
     def __init__(self, api: YunaAPI, parent=None) -> None:
@@ -256,6 +579,23 @@ class ChatPage(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+
+        head_widget = QWidget()
+        head_widget.setFixedHeight(40)
+        header = QHBoxLayout(head_widget)
+        header.setContentsMargins(0, 0, 0, 0)
+        title = QLabel("Chat")
+        title.setStyleSheet(f"font-size: 22px; font-weight: 700; color: {TEXT};")
+        self.online = QLabel("\u25cf  WebSocket onlayn")
+        self.online.setStyleSheet(
+            f"color: {TEAL}; background: #16302C; border-radius: 11px;"
+            "padding: 5px 12px; font-size: 12px;"
+        )
+        header.addWidget(title)
+        header.addStretch(1)
+        header.addWidget(self.online)
+        layout.addWidget(head_widget)
 
         splitter = QSplitter()
 
@@ -277,7 +617,9 @@ class ChatPage(QWidget):
 
         self.view = QTextBrowser()
         self.view.setOpenExternalLinks(True)
-        self.view.setStyleSheet("background: white; border: 1px solid #ECEBF5; padding: 12px;")
+        self.view.setStyleSheet(
+            "background: #1B1B28; border: 1px solid #2B2B3D; border-radius: 14px; padding: 12px;"
+        )
         right_layout.addWidget(self.view)
 
         input_row = QWidget()
@@ -310,7 +652,7 @@ class ChatPage(QWidget):
 
     def _render_welcome(self) -> None:
         self.view.setHtml(
-            "<div style='font-family: Segoe UI, sans-serif; font-size: 14px; color: #6B6B80;'>"
+            "<div style='font-family: Segoe UI, sans-serif; font-size: 14px; color: #8E8EA8;'>"
             "<p>Salom! Men Yuna. Eslatma, ovqat hisobi, rasm yoki hujjat — "
             "shunchaki yozing.</p></div>"
         )
@@ -339,8 +681,8 @@ class ChatPage(QWidget):
             )
         return (
             "<div style='text-align:left;margin:8px 0;'>"
-            "<span style='background:white;border:1px solid #eee;padding:8px 12px;"
-            "border-radius:12px;display:inline-block;max-width:70%;'>"
+            "<span style='background:#262636;border:1px solid #2B2B3D;color:#ECECF5;"
+            "padding:8px 12px;border-radius:12px;display:inline-block;max-width:70%;'>"
             f"{formatted}</span></div>"
         )
 
@@ -612,6 +954,197 @@ class AdvicePage(QWidget):
         self.text.setPlainText(data.get("text", ""))
 
 
+# ----------------------------- Hujjat -----------------------------
+class DocumentsPage(QWidget):
+    """Word (.docx) yuklash, AI bilan tahrirlash va versiyalarni boshqarish."""
+
+    def __init__(self, api: YunaAPI, parent=None) -> None:
+        super().__init__(parent)
+        self.api = api
+        self._ids: list[int] = []
+        self._names: dict[int, str] = {}
+        self._selected: int | None = None
+        self._picked: str | None = None
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        upload, upload_layout = card_box("Word fayl yuklash")
+        row = QHBoxLayout()
+        self.pick_button = QPushButton("Fayl tanlash")
+        self.pick_button.clicked.connect(self._pick)
+        self.picked_label = QLabel("Fayl tanlanmagan")
+        self.picked_label.setObjectName("muted")
+        self.upload_button = QPushButton("Yuklash")
+        self.upload_button.setObjectName("primary")
+        self.upload_button.clicked.connect(self._upload)
+        row.addWidget(self.pick_button)
+        row.addWidget(self.picked_label, 1)
+        row.addWidget(self.upload_button)
+        upload_layout.addLayout(row)
+        hint = QLabel("Faqat .docx fayl qabul qilinadi. Har bir yuklash yangi versiya sifatida saqlanadi.")
+        hint.setObjectName("muted")
+        hint.setWordWrap(True)
+        upload_layout.addWidget(hint)
+        layout.addWidget(upload)
+
+        edit, edit_layout = card_box("AI bilan tahrirlash")
+        self.instruction = QLineEdit()
+        self.instruction.setPlaceholderText(
+            "Masalan: matnni rasmiy uslubda qayta yoz va imlo xatolarini tuzat"
+        )
+        self.instruction.returnPressed.connect(self._edit)
+        self.edit_button = QPushButton("Tahrirlash")
+        self.edit_button.setObjectName("primary")
+        self.edit_button.clicked.connect(self._edit)
+        edit_row = QHBoxLayout()
+        edit_row.addWidget(self.instruction, 1)
+        edit_row.addWidget(self.edit_button)
+        edit_layout.addLayout(edit_row)
+        self.selected_label = QLabel("Tahrirlash uchun hujjat tanlanmagan")
+        self.selected_label.setObjectName("muted")
+        edit_layout.addWidget(self.selected_label)
+        layout.addWidget(edit)
+
+        documents, documents_layout = card_box("Hujjatlar va versiyalar")
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Fayl", "Versiya", "Hajm", "Sana"])
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setColumnWidth(0, 360)
+        self.table.setColumnWidth(1, 90)
+        self.table.setColumnWidth(2, 100)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.itemSelectionChanged.connect(self._on_select)
+        documents_layout.addWidget(self.table, 1)
+
+        actions = QHBoxLayout()
+        refresh_button = QPushButton("Yangilash")
+        refresh_button.clicked.connect(self.refresh)
+        download_button = QPushButton("Tanlanganni yuklab olish")
+        download_button.clicked.connect(self._download)
+        actions.addWidget(refresh_button)
+        actions.addWidget(download_button)
+        actions.addStretch(1)
+        documents_layout.addLayout(actions)
+        layout.addWidget(documents, 1)
+
+    def refresh(self) -> None:
+        try:
+            items = self.api.documents()
+        except ApiError as exc:
+            QMessageBox.warning(self, "Xato", str(exc))
+            return
+        self._ids = []
+        self._names = {}
+        self.table.blockSignals(True)
+        self.table.setRowCount(0)
+        selected_row = -1
+        for item in items:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            file_id = int(item["file_id"])
+            self.table.setItem(row, 0, QTableWidgetItem(item["original_name"]))
+            self.table.setItem(row, 1, QTableWidgetItem(f"v{item['version']}"))
+            self.table.setItem(
+                row, 2, QTableWidgetItem(f"{int(item.get('size_bytes') or 0) / 1024:.0f} KB")
+            )
+            self.table.setItem(row, 3, QTableWidgetItem(to_local_text(item.get("created_at") or "")))
+            self._ids.append(file_id)
+            self._names[file_id] = item["original_name"]
+            if self._selected == file_id:
+                selected_row = row
+        self.table.blockSignals(False)
+        if selected_row >= 0:
+            self.table.selectRow(selected_row)
+        elif self._ids and self._selected not in self._ids:
+            self._selected = self._ids[0]
+            self.table.selectRow(0)
+        self._update_selected_label()
+
+    def _update_selected_label(self) -> None:
+        if self._selected is None:
+            self.selected_label.setText("Tahrirlash uchun hujjat tanlanmagan")
+            return
+        name = self._names.get(self._selected, f"#{self._selected}")
+        self.selected_label.setText(f"Tanlangan hujjat: {name} (#{self._selected})")
+
+    def _on_select(self) -> None:
+        row = self.table.currentRow()
+        if 0 <= row < len(self._ids):
+            self._selected = self._ids[row]
+            self._update_selected_label()
+
+    def _pick(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Word fayl tanlash", "", "Word hujjat (*.docx)")
+        if path:
+            self._picked = path
+            self.picked_label.setText(os.path.basename(path))
+
+    def _upload(self) -> None:
+        if not self._picked:
+            QMessageBox.information(self, "Diqqat", "Avval .docx faylni tanlang.")
+            return
+        if not self._picked.lower().endswith(".docx"):
+            QMessageBox.information(self, "Diqqat", "Faqat .docx fayl yuklanadi.")
+            return
+        self.upload_button.setEnabled(False)
+        QApplication.processEvents()
+        try:
+            data = self.api.upload_document(self._picked)
+        except (ApiError, OSError) as exc:
+            QMessageBox.warning(self, "Xato", str(exc))
+            return
+        finally:
+            self.upload_button.setEnabled(True)
+        self._selected = int(data["file_id"])
+        self._picked = None
+        self.picked_label.setText("Fayl tanlanmagan")
+        self.refresh()
+        QMessageBox.information(self, "Tayyor", f"Fayl yuklandi: v{data['version']}")
+
+    def _edit(self) -> None:
+        instruction = self.instruction.text().strip()
+        if self._selected is None:
+            QMessageBox.information(self, "Diqqat", "Tahrirlash uchun hujjatni jadvaldan tanlang.")
+            return
+        if len(instruction) < 2:
+            QMessageBox.information(self, "Diqqat", "Tahrir ko'rsatmasini yozing.")
+            return
+        self.edit_button.setEnabled(False)
+        self.edit_button.setText("Tahrirlanmoqda...")
+        QApplication.processEvents()
+        try:
+            data = self.api.edit_document(self._selected, instruction)
+        except ApiError as exc:
+            QMessageBox.warning(self, "Xato", str(exc))
+            return
+        finally:
+            self.edit_button.setEnabled(True)
+            self.edit_button.setText("Tahrirlash")
+        self._selected = int(data["file_id"])
+        self.instruction.clear()
+        self.refresh()
+        QMessageBox.information(self, "Tayyor", f"Yangi versiya tayyor: v{data['version']}")
+
+    def _download(self) -> None:
+        if self._selected is None:
+            QMessageBox.information(self, "Diqqat", "Jadvaldan hujjatni tanlang.")
+            return
+        name = self._names.get(self._selected, "hujjat.docx")
+        path, _ = QFileDialog.getSaveFileName(self, "Saqlash", name, "Word hujjat (*.docx)")
+        if not path:
+            return
+        try:
+            self.api.download_document(self._selected, path)
+        except (ApiError, OSError) as exc:
+            QMessageBox.warning(self, "Xato", str(exc))
+            return
+        QMessageBox.information(self, "Tayyor", f"Fayl saqlandi:\n{path}")
+
+
 # ----------------------------- Sozlamalar -----------------------------
 class SettingsPage(QWidget):
     logged_out = Signal()
@@ -867,7 +1400,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.api = api
         self.setWindowTitle("Y.U.N.A")
-        self.resize(1060, 720)
+        self.resize(1240, 800)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -877,30 +1410,47 @@ class MainWindow(QMainWindow):
 
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(210)
+        sidebar.setFixedWidth(238)
         side_layout = QVBoxLayout(sidebar)
-        side_layout.setContentsMargins(14, 18, 14, 18)
-        side_layout.setSpacing(6)
+        side_layout.setContentsMargins(16, 22, 16, 18)
+        side_layout.setSpacing(4)
 
-        brand = QLabel("Y.U.N.A")
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(10)
+        logo = QLabel()
+        pixmap = QPixmap(resource_path("icon.png"))
+        if not pixmap.isNull():
+            logo.setPixmap(pixmap.scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        brand = QLabel("Yuna")
         brand.setObjectName("brand")
-        side_layout.addWidget(brand)
+        brand_row.addWidget(logo)
+        brand_row.addWidget(brand)
+        brand_row.addStretch(1)
+        side_layout.addLayout(brand_row)
         tagline = QLabel("Shaxsiy yordamchingiz")
         tagline.setObjectName("muted")
         side_layout.addWidget(tagline)
-        side_layout.addSpacing(14)
+        side_layout.addSpacing(18)
 
         self.stack = QStackedWidget()
         self.pages: dict[str, QWidget] = {}
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
 
-        sections = ["Suhbat", "Eslatmalar", "Ovqat", "Maslahat", "Sozlamalar"]
+        sections = [
+            ("Bugun", "\U0001f3e0  Bugun"),
+            ("Chat", "\U0001f4ac  Chat"),
+            ("Eslatmalar", "\U0001f4cb  Eslatmalar"),
+            ("Ovqat", "\U0001f374  Ovqat"),
+            ("Hujjat", "\U0001f4c4  Hujjatlar"),
+            ("Maslahat", "\U0001f4a1  Maslahat"),
+            ("Sozlamalar", "\u2699  Sozlamalar"),
+        ]
         if (api.user or {}).get("is_admin"):
-            sections.append("Admin")
+            sections.append(("Admin", "\U0001f6e1  Admin"))
 
-        for index, name in enumerate(sections):
-            button = QPushButton(name)
+        for index, (name, label) in enumerate(sections):
+            button = QPushButton(label)
             button.setObjectName("nav")
             button.setCheckable(True)
             button.setCursor(Qt.PointingHandCursor)
@@ -914,8 +1464,12 @@ class MainWindow(QMainWindow):
         side_layout.addStretch(1)
         user = api.user or {}
         who = QLabel(user.get("name") or "")
-        who.setObjectName("muted")
+        who.setStyleSheet(f"color: {TEXT}; font-size: 14px; font-weight: 600;")
+        role = QLabel("Admin" if user.get("is_admin") else user.get("email") or "Foydalanuvchi")
+        role.setObjectName("muted")
         side_layout.addWidget(who)
+        side_layout.addWidget(role)
+        side_layout.addSpacing(8)
         logout = QPushButton("Chiqish")
         logout.clicked.connect(self._logout)
         side_layout.addWidget(logout)
@@ -923,15 +1477,17 @@ class MainWindow(QMainWindow):
         layout.addWidget(sidebar)
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(18, 18, 18, 18)
+        content_layout.setContentsMargins(22, 20, 22, 20)
         content_layout.addWidget(self.stack)
         layout.addWidget(content, 1)
 
-        self.go("Suhbat")
+        self.go("Bugun")
         self._start_ws()
 
     def _make_page(self, name: str) -> QWidget:
-        if name == "Suhbat":
+        if name == "Bugun":
+            return HomePage(self.api, self.go, self)
+        if name == "Chat":
             self.chat_page = ChatPage(self.api, self)
             return self.chat_page
         if name == "Eslatmalar":
@@ -940,6 +1496,8 @@ class MainWindow(QMainWindow):
             return FoodPage(self.api, self)
         if name == "Maslahat":
             return AdvicePage(self.api, self)
+        if name == "Hujjat":
+            return DocumentsPage(self.api, self)
         if name == "Sozlamalar":
             page = SettingsPage(self.api, self)
             page.logged_out.connect(self._logout)
