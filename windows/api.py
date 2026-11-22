@@ -17,6 +17,25 @@ def _secret_path() -> Path:
     return CONFIG_DIR / "session.json"
 
 
+def _config_path() -> Path:
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    return CONFIG_DIR / "config.json"
+
+
+def load_config() -> dict:
+    try:
+        return json.loads(_config_path().read_text())
+    except Exception:
+        return {}
+
+
+def save_config(data: dict) -> None:
+    try:
+        _config_path().write_text(json.dumps(data, ensure_ascii=False))
+    except Exception:
+        pass
+
+
 def save_tokens(tokens: dict) -> None:
     try:
         import keyring
@@ -69,7 +88,7 @@ class ApiError(Exception):
 
 class YunaAPI:
     def __init__(self, base_url: str = "http://127.0.0.1:8000") -> None:
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (load_config().get("api_url") or base_url).rstrip("/")
         self.client = httpx.Client(base_url=self.base_url, timeout=60)
         self.access_token: str | None = None
         self.refresh_token: str | None = None
@@ -173,6 +192,72 @@ class YunaAPI:
     def ws_url(self) -> str:
         base = self.base_url.replace("https://", "wss://").replace("http://", "ws://")
         return f"{base}/ws?token={self.access_token}"
+
+    # ---------- sozlamalar ----------
+    def set_base_url(self, url: str) -> None:
+        url = url.strip().rstrip("/")
+        if not url:
+            return
+        config = load_config()
+        config["api_url"] = url
+        save_config(config)
+        self.base_url = url
+        self.client = httpx.Client(base_url=url, timeout=60)
+
+    def me(self) -> dict:
+        data = self._request("GET", "/api/v1/me")
+        self.user = data
+        return data
+
+    def update_me(self, fields: dict) -> dict:
+        data = self._request("PATCH", "/api/v1/me", json=fields)
+        self.user = data
+        return data
+
+    def change_password(self, current: str, new: str) -> None:
+        self._request(
+            "POST",
+            "/api/v1/auth/change-password",
+            json={"current_password": current, "new_password": new},
+        )
+
+    def forget_session(self) -> None:
+        clear_tokens()
+        self.access_token = None
+        self.refresh_token = None
+
+    # ---------- eslatmalar ----------
+    def reminders(self) -> list[dict]:
+        return self._request("GET", "/api/v1/reminders").get("items", [])
+
+    def create_reminder(self, text: str, remind_at: str) -> dict:
+        return self._request(
+            "POST",
+            "/api/v1/reminders",
+            json={"text": text, "remind_at": remind_at, "channel": "both"},
+        )
+
+    def delete_reminder(self, reminder_id: int) -> None:
+        self._request("DELETE", f"/api/v1/reminders/{reminder_id}")
+
+    # ---------- ovqat ----------
+    def food_summary(self) -> dict:
+        return self._request("GET", "/api/v1/food/summary")
+
+    def log_food(self, text: str) -> dict:
+        return self._request("POST", "/api/v1/food/log", json={"text": text})
+
+    # ---------- maslahat ----------
+    def advice_today(self) -> dict:
+        return self._request("GET", "/api/v1/advice/today")
+
+    # ---------- admin ----------
+    def admin_users(self) -> list[dict]:
+        return self._request("GET", "/api/v1/admin/users").get("items", [])
+
+    def admin_stats(self) -> dict:
+        return self._request("GET", "/api/v1/admin/stats")
+
 
     def close(self) -> None:
         self.client.close()

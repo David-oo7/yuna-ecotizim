@@ -42,13 +42,44 @@ class UserOut(BaseModel):
     language: str
     advice_time: Any = None
     kcal_goal: int
+    is_admin: bool = False
 
 
 class UserUpdate(BaseModel):
-    name: str | None = Field(default=None, max_length=120)
-    timezone: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    email: str | None = Field(default=None, min_length=3, max_length=255)
+    timezone: str | None = Field(default=None, max_length=64)
+    language: str | None = Field(default=None, max_length=8)
     advice_time: Any = None
     kcal_goal: int | None = Field(default=None, ge=800, le=6000)
+
+
+class PasswordChangeIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=6, max_length=128)
+
+
+class AdminUserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    email: str | None = None
+    language: str
+    timezone: str
+    kcal_goal: int
+    is_admin: bool
+    is_active: bool
+    created_at: datetime
+
+
+class AdminStats(BaseModel):
+    users: int
+    devices: int
+    sessions: int
+    messages: int
+    reminders: int
+    food_logs: int
 
 
 # ---------------- Chat ----------------

@@ -31,6 +31,10 @@ logger = logging.getLogger("yuna")
 async def lifespan(app: FastAPI):
     if settings.auto_migrate:
         await init_models()
+        from app.bootstrap import ensure_admin_account, ensure_schema
+
+        await ensure_schema()
+        await ensure_admin_account()
     if not settings.is_test:
         from app.scheduler.jobs import start_scheduler, stop_scheduler
 

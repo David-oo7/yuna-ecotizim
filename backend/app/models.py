@@ -75,6 +75,7 @@ class User(Base):
     language: Mapped[str] = mapped_column(String(8), default="uz")
     advice_time: Mapped[time] = mapped_column(Time, default=time(8, 0))
     kcal_goal: Mapped[int] = mapped_column(Integer, default=2200)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 

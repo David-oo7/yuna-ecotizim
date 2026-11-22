@@ -71,5 +71,12 @@ async def get_device(
     return result.scalar_one_or_none()
 
 
+async def get_current_admin(user: User = Depends(get_current_user)) -> User:
+    """Faqat admin foydalanuvchi o'tadi."""
+    if not user.is_admin:
+        raise AppError(status.HTTP_403_FORBIDDEN, "FORBIDDEN", "Bu amal faqat admin uchun.")
+    return user
+
+
 def error_body(code: str, message: str, field: str | None = None) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "field": field}}

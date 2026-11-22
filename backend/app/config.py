@@ -20,6 +20,11 @@ class Settings(BaseSettings):
     # Baza
     database_url: str = "sqlite+aiosqlite:///./yuna.db"
 
+    # Admin akkaunt (birinchi ishga tushishda avtomatik yaratiladi)
+    admin_email: str = "admin@yuna.uz"
+    admin_password: str = "yuna-admin-2026"
+    admin_name: str = "Yuna Admin"
+
     # JWT
     jwt_algorithm: str = "HS256"
     access_token_ttl_min: int = 15
