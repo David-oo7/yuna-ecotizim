@@ -417,68 +417,70 @@ private fun HomeScreen(
 
     LaunchedEffect(Unit) { load() }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        Spacer(Modifier.height(6.dp))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            YunaLogo()
-            Spacer(Modifier.weight(1f))
-            AvatarBadge(user?.name)
-            Spacer(Modifier.width(10.dp))
-            Box(
-                Modifier.size(38.dp).background(SURFACE, RoundedCornerShape(12.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.Notifications,
-                    contentDescription = "Bildirishnomalar",
-                    tint = MUTED,
-                    modifier = Modifier.size(20.dp),
-                )
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 16.dp, end = 16.dp, bottom = 88.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                YunaLogo()
+                Spacer(Modifier.weight(1f))
+                AvatarBadge(user?.name)
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    Modifier.size(38.dp).background(SURFACE, RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Filled.Notifications,
+                        contentDescription = "Bildirishnomalar",
+                        tint = MUTED,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
-        }
 
-        Column {
-            Text("Xush kelibsiz!", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = INK)
-            Text(todayUz(), color = MUTED, fontSize = 13.sp)
-        }
-
-        AdviceCard(advice, busy) { scope.launch { load() } }
-
-        FoodBalanceCard(summary)
-
-        ReminderStrip(nextReminder, onOpenReminders)
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            QuickChip("\uD83D\uDCC4 Hujjatlar", onOpenDocs)
-            QuickChip("\uD83C\uDF7D Ovqat", onOpenFood)
-            QuickChip("\uD83D\uDCAC Chat", onOpenChat)
-        }
-
-        QuickMicCard(onVoice)
-
-        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Box(
-                Modifier
-                    .size(72.dp)
-                    .background(Brush.linearGradient(listOf(TEAL, GREEN)), CircleShape)
-                    .clickable { onVoice() },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Filled.Mic,
-                    contentDescription = "Mikrofon",
-                    tint = Color(0xFF06231F),
-                    modifier = Modifier.size(32.dp),
-                )
+            Column {
+                Text("Xush kelibsiz!", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = INK)
+                Text(todayUz(), color = MUTED, fontSize = 13.sp)
             }
+
+            AdviceCard(advice, busy) { scope.launch { load() } }
+
+            FoodBalanceCard(summary)
+
+            ReminderStrip(nextReminder, onOpenReminders)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QuickChip("\uD83D\uDCC4 Hujjatlar", onOpenDocs)
+                QuickChip("\uD83C\uDF7D Ovqat", onOpenFood)
+                QuickChip("\uD83D\uDCAC Chat", onOpenChat)
+            }
+
+            QuickMicCard(onVoice)
+            Spacer(Modifier.height(6.dp))
         }
-        Spacer(Modifier.height(16.dp))
+
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 10.dp)
+                .size(72.dp)
+                .background(Brush.linearGradient(listOf(TEAL, GREEN)), CircleShape)
+                .clickable { onVoice() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Filled.Mic,
+                contentDescription = "Mikrofon",
+                tint = Color(0xFF06231F),
+                modifier = Modifier.size(32.dp),
+            )
+        }
     }
 }
 
@@ -604,15 +606,17 @@ private fun MacroBar(label: String, value: Float, target: Float, color: Color) {
         Box(
             Modifier.fillMaxWidth().height(8.dp).background(SURFACE_HI, RoundedCornerShape(4.dp)),
         ) {
-            Box(
-                Modifier
-                    .fillMaxWidth(ratio.coerceAtLeast(0.02f))
-                    .fillMaxHeight()
-                    .background(
-                        Brush.horizontalGradient(listOf(TEAL, color)),
-                        RoundedCornerShape(4.dp),
-                    ),
-            )
+            if (ratio > 0f) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(ratio.coerceAtLeast(0.04f))
+                        .fillMaxHeight()
+                        .background(
+                            Brush.horizontalGradient(listOf(TEAL, color)),
+                            RoundedCornerShape(4.dp),
+                        ),
+                )
+            }
         }
     }
 }
