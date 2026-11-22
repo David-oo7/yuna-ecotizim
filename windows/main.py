@@ -13,7 +13,7 @@ import os
 import sys
 
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtGui import QFont, QIcon, QTextCursor
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -34,6 +34,12 @@ from api import ApiError, YunaAPI
 
 BASE_URL = os.getenv("YUNA_API_URL", "http://127.0.0.1:8000")
 ACCENT = "#7C5CFF"
+
+
+def resource_path(name: str) -> str:
+    """Fayl yo'li: .exe ichida ham, oddiy ishga tushirishda ham ishlaydi."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, name)
 
 
 # ----------------------------- WebSocket -----------------------------
@@ -331,6 +337,9 @@ class ChatWindow(QMainWindow):
 def main() -> int:
     app = QApplication(sys.argv)
     app.setFont(QFont("Segoe UI", 10))
+    icon = QIcon(resource_path("icon.png"))
+    if not icon.isNull():
+        app.setWindowIcon(icon)
     api = YunaAPI(BASE_URL)
 
     state: dict = {}
