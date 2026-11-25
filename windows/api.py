@@ -22,16 +22,23 @@ def _config_path() -> Path:
     return CONFIG_DIR / "config.json"
 
 
+def _read_json(path: Path):
+    """BOM (utf-8-sig) bilan saqlangan fayllarni ham o'qiy oladi."""
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
 def load_config() -> dict:
     try:
-        return json.loads(_config_path().read_text())
+        return _read_json(_config_path())
     except Exception:
         return {}
 
 
 def save_config(data: dict) -> None:
     try:
-        _config_path().write_text(json.dumps(data, ensure_ascii=False))
+        _config_path().write_text(
+            json.dumps(data, ensure_ascii=False), encoding="utf-8"
+        )
     except Exception:
         pass
 
@@ -42,10 +49,12 @@ def save_tokens(tokens: dict) -> None:
 
         keyring.set_password(APP_NAME, "refresh_token", tokens["refresh_token"])
     except Exception:
-        _secret_path().write_text(json.dumps({"refresh_token": tokens["refresh_token"]}))
+        _secret_path().write_text(
+            json.dumps({"refresh_token": tokens["refresh_token"]}), encoding="utf-8"
+        )
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     (_secret_path().parent / "user.json").write_text(
-        json.dumps(tokens["user"], ensure_ascii=False)
+        json.dumps(tokens["user"], ensure_ascii=False), encoding="utf-8"
     )
 
 
@@ -60,7 +69,7 @@ def load_refresh_token() -> str | None:
         pass
     if _secret_path().exists():
         try:
-            return json.loads(_secret_path().read_text())["refresh_token"]
+            return _read_json(_secret_path())["refresh_token"]
         except Exception:
             return None
     return None
@@ -285,6 +294,58 @@ class YunaAPI:
         if response.status_code >= 400:
             self._raise(response)
         Path(target).write_bytes(response.content)
+
+    # ---------- umumiy fayllar ----------
+    def files(self, kind: str | None = None) -> list[dict]:
+        params = {"kind": kind} if kind else {}
+        return self._request("GET", "/api/v1/files", params=params).get("items", [])
+
+    def upload_file(self, path: str, kind: str = "laptop_file") -> dict:
+        filename = os.path.basename(path)
+        with open(path, "rb") as handle:
+            data = handle.read()
+        return self._request(
+            "POST",
+            "/api/v1/files/upload",
+            data={"kind": kind},
+            files={"file": (filename, data, "application/octet-stream")},
+            timeout=300,
+        )
+
+    def delete_file(self, file_id: int) -> dict:
+        return self._request("DELETE", f"/api/v1/files/{file_id}")
+
+    def download_file(self, file_id: int, target: str) -> None:
+        response = self.client.get(
+            f"/api/v1/files/{file_id}/download",
+            headers=self._headers(),
+            follow_redirects=True,
+            timeout=300,
+        )
+        if response.status_code >= 400:
+            self._raise(response)
+        Path(target).write_bytes(response.content)
+
+    # ---------- vision / rasm tahlili ----------
+    def explain_vision(self, image_path: str, question: str = "") -> dict:
+        filename = os.path.basename(image_path)
+        with open(image_path, "rb") as handle:
+            data = handle.read()
+        return self._request(
+            "POST",
+            "/api/v1/vision/explain",
+            data={"question": question} if question else {},
+            files={"image": (filename, data, "image/jpeg")},
+            timeout=120,
+        )
+
+    # ---------- qurilma buyrug'i javobi ----------
+    def ack_command(self, command_id: int, ok: bool = True, result: dict | None = None) -> dict:
+        return self._request(
+            "POST",
+            f"/api/v1/devices/commands/{command_id}/ack",
+            json={"ok": ok, **(result or {})},
+        )
 
     # ---------- maslahat ----------
     def advice_today(self) -> dict:
